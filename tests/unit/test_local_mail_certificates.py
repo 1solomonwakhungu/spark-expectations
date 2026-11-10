@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import ssl
 import subprocess
 
 import pytest
@@ -10,25 +11,52 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_generated_mail_certificate_names_and_trust(tmp_path):
+def verify_tls_certificate(output, host, *, trust_ca=True):
+    """Verify an in-memory TLS handshake without CLI-specific hostname flags."""
+    client_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    client_context.verify_flags |= ssl.VERIFY_X509_STRICT
+    if trust_ca:
+        client_context.load_verify_locations(cafile=str(output / "mailpit-ca.crt"))
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(str(output / "mailpit.crt"), str(output / "mailpit.key"))
+    client_in, client_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+    server_in, server_out = ssl.MemoryBIO(), ssl.MemoryBIO()
+    client = client_context.wrap_bio(client_in, client_out, server_hostname=host)
+    server = server_context.wrap_bio(server_in, server_out, server_side=True)
+    for _ in range(10):
+        completed = 0
+        for peer, outgoing, incoming in (
+            (client, client_out, server_in), (server, server_out, client_in)
+        ):
+            try:
+                peer.do_handshake()
+                completed += 1
+            except ssl.SSLWantReadError:
+                pass
+            incoming.write(outgoing.read())
+        if completed == 2:
+            return
+    pytest.fail("TLS handshake did not complete")
+
+
+@pytest.mark.parametrize("long_path", [False, True], ids=["short-path", "long-absolute-path"])
+def test_generated_mail_certificate_names_and_trust(tmp_path, long_path):
     openssl = shutil.which("openssl")
     if not openssl:
         pytest.skip("openssl is required")
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path)}
     output = tmp_path / "certs"
+    if long_path:
+        output = output / ("long-output-" + "a" * 90) / ("nested-" + "b" * 90) / ("c" * 90)
+        assert output.is_absolute() and len(str(output)) > 256
     command = ["sh", str(ROOT / "containers/mailserver/generate-certs.sh"), str(output)]
     subprocess.run(command, env=env, check=True, capture_output=True)
-    for host in ("mailpit", "localhost"):
-        subprocess.run([openssl, "verify", "-CAfile", str(output / "mailpit-ca.crt"),
-                        "-verify_hostname", host, str(output / "mailpit.crt")],
-                       env=env, check=True, capture_output=True)
-    subprocess.run([openssl, "verify", "-CAfile", str(output / "mailpit-ca.crt"),
-                    "-verify_ip", "127.0.0.1", str(output / "mailpit.crt")],
-                   env=env, check=True, capture_output=True)
-    wrong = subprocess.run([openssl, "verify", "-CAfile", str(output / "mailpit-ca.crt"),
-                            "-verify_hostname", "unrelated.invalid", str(output / "mailpit.crt")],
-                           env=env, capture_output=True)
-    assert wrong.returncode != 0
+    for host in ("mailpit", "localhost", "127.0.0.1"):
+        verify_tls_certificate(output, host)
+    with pytest.raises(ssl.SSLCertVerificationError):
+        verify_tls_certificate(output, "unrelated.invalid")
+    with pytest.raises(ssl.SSLCertVerificationError):
+        verify_tls_certificate(output, "mailpit", trust_ca=False)
     assert {p.name for p in output.iterdir()} == {"mailpit-ca.crt", "mailpit.crt", "mailpit.key"}
     assert output.joinpath("mailpit.key").stat().st_mode & 0o077 == 0
     original = output.joinpath("mailpit.crt").read_bytes()

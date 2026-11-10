@@ -34,18 +34,23 @@ keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
 subjectAltName=DNS:mailpit,DNS:localhost,IP:127.0.0.1
 CONFIG
-openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
-    -keyout "$scratch/ca.key" -out "$scratch/ca.crt" \
-    -subj '/CN=Local development mail CA' \
-    -addext 'basicConstraints=critical,CA:TRUE' \
-    -addext 'keyUsage=critical,keyCertSign,cRLSign' \
-    -addext 'subjectKeyIdentifier=hash' \
-    -addext 'authorityKeyIdentifier=keyid:always' 2>/dev/null
-openssl req -new -newkey rsa:2048 -nodes -keyout "$scratch/server.key" \
-    -out "$scratch/server.csr" -subj '/CN=mailpit' 2>/dev/null
-openssl x509 -req -in "$scratch/server.csr" -CA "$scratch/ca.crt" \
-    -CAkey "$scratch/ca.key" -CAcreateserial -days 30 \
-    -extfile "$scratch/extensions.cnf" -out "$scratch/server.crt" 2>/dev/null
+# OpenSSL may reject long absolute CA paths when deriving its serial filename.
+# Keep generation paths short without changing the staging or publication paths.
+(
+    cd "$scratch"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
+        -keyout ca.key -out ca.crt \
+        -subj '/CN=Local development mail CA' \
+        -addext 'basicConstraints=critical,CA:TRUE' \
+        -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+        -addext 'subjectKeyIdentifier=hash' \
+        -addext 'authorityKeyIdentifier=keyid:always' 2>/dev/null
+    openssl req -new -newkey rsa:2048 -nodes -keyout server.key \
+        -out server.csr -subj '/CN=mailpit' 2>/dev/null
+    openssl x509 -req -in server.csr -CA ca.crt \
+        -CAkey ca.key -CAcreateserial -days 30 \
+        -extfile extensions.cnf -out server.crt 2>/dev/null
+)
 # Exact-path hard links refuse existing entries, including directories and symlinks.
 # Staging under the destination keeps the files on the same filesystem.
 link_exact() {
