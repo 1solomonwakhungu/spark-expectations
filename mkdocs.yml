@@ -46,6 +46,7 @@ nav:
   - Home:
       - Overview: index.md
       - Why Spark-Expectations: home/why_spark_expectations.md
+      - Security Model: security.md
   - Getting Started:
       - Installation & Prerequisites: user_guide/getting_started.md
       - Quickstart: user_guide/quickstart.md
@@ -86,6 +87,7 @@ nav:
   - Developer Guide:
       - Contributing: developer_guide/contributing.md
       - Development Setup: developer_guide/setup.md
+      - CI and Release: developer_guide/release.md
   - Python API:
       - Core:
           - Init: api/core_init.md
