@@ -683,84 +683,52 @@ def test_report_with_null_string_row_counts():
     )
 
 
-def test_report_with_zero_string_total_records():
-    """Division by zero (total_records = '0') should produce null or inf,
-    not raise an exception."""
-    zero_row = (
-        "run_zero_test",
-        "your_product",
-        "dq_spark_dev.customer_order",
-        "query_dq",
-        "zero_total_rule",
-        "some_col",
-        "SELECT 1",
-        "validity",
-        "desc",
-        "fail",
-        "0",
-        "0",
-        "50",    # source_dq_actual_row_count (valid_records)
-        "50",
-        "0",     # source_dq_row_count (total_records) = 0 -> division by zero
-        "2025-02-11 00:07:39",
-        "2025-02-11 00:07:40",
-        None, None, None, None, None, None, None, None, None,
-        "2025-02-10",
-        "2025-02-11 00:07:46",
-        "{'job': 'test_job', 'Region': 'NA', 'Snapshot': '2024-04-15', 'data_object_name': 'customer_order'}",
-    )
-
-    df_detailed = _build_string_typed_detailed_df(extra_rows=[zero_row])
-    df_custom = _build_custom_detailed_df()
-
-    test_result, test_df = _run_report(df_detailed, df_custom)
-    assert test_result is True
-
-    zero_run = test_df.filter(test_df["run_id"] == "run_zero_test")
-    assert zero_run.count() == 1
-    # row = zero_run.collect()[0]
-    # assert row["success_percentage"] is 0, (
-    #     "success_percentage should be zero when valid_records is 50 and total_records is zero"
-    # )
-
-### commented out code surfaces a bug that should be fixed
-# https://github.com/Nike-Inc/spark-expectations/issues/314
-
-# def test_report_with_both_zero_string_row_counts():
-#     """If both valid_records and total_records is 0, the output should be 0."""
-#     zero_row = (
-#         "run_zeros_test",
-#         "your_product",
-#         "dq_spark_dev.customer_order",
-#         "query_dq",
-#         "zero_total_rule",
-#         "some_col",
-#         "SELECT 1",
-#         "validity",
-#         "desc",
-#         "fail",
-#         "0",
-#         "0",
-#         "0",    # source_dq_actual_row_count (valid_records)
-#         "50",
-#         "0",     # source_dq_row_count (total_records) = 0 -> division by zero
-#         "2025-02-11 00:07:39",
-#         "2025-02-11 00:07:40",
-#         None, None, None, None, None, None, None, None, None,
-#         "2025-02-10",
-#         "2025-02-11 00:07:46",
-#         "{'job': 'test_job', 'Region': 'NA', 'Snapshot': '2024-04-15', 'data_object_name': 'customer_order'}",
-#     )
-
-#     df_detailed = _build_string_typed_detailed_df(extra_rows=[zero_row])
-#     df_custom = _build_custom_detailed_df()
-
-#     test_result, test_df = _run_report(df_detailed, df_custom)
-#     assert test_result is True
-
-#     zeros_run = test_df.filter(test_df["run_id"] == "run_zeros_test")
-#     assert zeros_run.count() == 1
-#     row = zeros_run.collect()[0]
-#     assert row["success_percentage"] == 0, (
-#         "success_percentage should be zero when both valid_records and total_records are zero"
-#     )
+@pytest.mark.parametrize("ansi_enabled", [False, True])
+@pytest.mark.parametrize("count_type", ["string", "long"])
+def test_report_zero_denominators_and_unknown_counts(ansi_enabled, count_type):
+    """Materialize percentages: row counts alone can prune the division."""
+    cases = [
+        ("both_zero", "0", "0", 0.0),
+        ("zero_total", "50", "0", 0.0),
+        ("ordinary", "95", "100", 95.0),
+        ("both_null", None, None, None),
+        ("null_valid", None, "100", None),
+        ("null_total", "50", None, None),
+        ("null_valid_zero_total", None, "0", None),
+    ]
+    extra_rows = [
+        (
+            run_id, "your_product", "dq_spark_dev.customer_order", "query_dq",
+            "count_rule", "some_col", "SELECT 1", "validity", "desc", "fail",
+            "0", "0", valid, "0", total,
+            "2025-02-11 00:07:39", "2025-02-11 00:07:40",
+            None, None, None, None, None, None, None, None, None,
+            "2025-02-10", "2025-02-11 00:07:46", "{}",
+        )
+        for run_id, valid, total, _ in cases
+    ]
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled")
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", str(ansi_enabled).lower())
+        detailed = _build_string_typed_detailed_df(extra_rows=extra_rows)
+        for column in ("source_dq_actual_row_count", "source_dq_row_count"):
+            detailed = detailed.withColumn(column, detailed[column].cast(count_type))
+        success, report = _run_report(detailed, _build_custom_detailed_df())
+        assert success is True
+        assert report.schema["success_percentage"].dataType == DoubleType()
+        rows = {
+            row["run_id"]: row
+            for row in report.filter(report.run_id.isin([case[0] for case in cases])).collect()
+        }
+        assert len(rows) == len(cases)
+        for run_id, valid, total, expected in cases:
+            row = rows[run_id]
+            assert row["success_percentage"] == expected
+            assert (None if row["valid_records"] is None else float(row["valid_records"])) == (
+                None if valid is None else float(valid)
+            )
+            assert (None if row["total_records"] is None else float(row["total_records"])) == (
+                None if total is None else float(total)
+            )
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)

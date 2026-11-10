@@ -16,9 +16,27 @@ make local-se-server-start ARGS="--build"
 
 Once running:
 
-- **Jupyter Lab**: [http://localhost:8888](http://localhost:8888)
-- **Mailpit UI** (view sent emails): [http://localhost:8025](http://localhost:8025)
-- **Kafka**: `localhost:9092`
+- **Jupyter Lab**: [http://127.0.0.1:8888](http://127.0.0.1:8888) (token required, see below)
+- **Mailpit UI** (view sent emails): [http://127.0.0.1:8025](http://127.0.0.1:8025)
+- **Mailpit SMTP**: `127.0.0.1:1025`
+- **Kafka**: `127.0.0.1:9092`
+
+All four ports are published on the host loopback interface (`127.0.0.1`) only, so other machines on your network cannot reach them. Notebooks inside the stack reach Mailpit and Kafka over the Compose network as before.
+
+### Logging in to Jupyter Lab
+
+Jupyter Lab generates a random login token each time the container starts and prints a login URL in the container log. To show it, run:
+
+```bash
+docker compose -f containers/compose.yaml logs spark-notebooks | grep "http://127.0.0.1:8888"
+```
+
+Open the `http://127.0.0.1:8888/lab?token=...` URL it prints. If the log has rotated, `docker exec se-notebook jupyter server list` prints the current token; it shows the container's hostname in the URL, so replace the host part with `127.0.0.1`. You can also paste the token into the login page at [http://127.0.0.1:8888](http://127.0.0.1:8888).
+
+Treat the token like a password: anyone who has it can run code in the container. Do not commit it, paste it into issues, or share screenshots that show it.
+
+!!! warning
+    Do not disable authentication by setting an empty token or password, and do not publish these ports on `0.0.0.0` or a LAN address. Jupyter Lab gives full code execution in the container. If you add volume mounts or credentials to the Compose file, anyone with access to Jupyter can use them too.
 
 ## Available Notebooks
 

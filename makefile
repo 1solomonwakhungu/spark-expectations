@@ -20,8 +20,15 @@ cov: kafka-cluster-start
 
 coverage: check test
 
+# `version` is untrusted input (for example a workflow_dispatch value). Redefine
+# it as a simply-expanded variable holding its literal text so make never
+# evaluates $(...) references inside it, export it to the recipe environment,
+# and only expand it inside double quotes after validation.
+override version := $(value version)
+deploy-docs: export DOCS_VERSION := $(version)
 deploy-docs:
-	@VERSION=$(version) hatch run $(DEFAULT_HATCH_ENV):deploy-docs
+	@./.github/ci/validate_release_version.sh "$$DOCS_VERSION" >/dev/null
+	@VERSION="$$DOCS_VERSION" hatch run $(DEFAULT_HATCH_ENV):deploy-docs
 
 deploy_env_setup:
 	@hatch env create
