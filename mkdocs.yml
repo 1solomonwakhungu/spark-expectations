@@ -54,6 +54,7 @@ nav:
           - Row, Aggregate & Query DQ: user_guide/data_quality_rules.md
           - File-Based Rules (YAML & JSON): user_guide/file_based_rules.md
           - Rule Validation: user_guide/rule_validation.md
+          - Invalid Rule Policy: user_guide/rule_validation_policy.md
           - Rule Examples: configurations/rules.md
       - Configuration Reference: user_guide/configuration_reference.md
       - Writers:

@@ -194,6 +194,14 @@ class SparkExpectationsContext:
         self._rules_execution_settings_config: Dict[str, str]
         self._querydq_secondary_queries: dict
 
+        # Rule validation policy state for the current run (see core/rule_validation_policy.py).
+        # None until a decorated function has evaluated the policy, so the stats writer
+        # only emits the "invalid_rules" map for runs that evaluated it.
+        self._rules_validation_policy: Optional[str] = None
+        self._invalid_rule_stats: Optional[Dict[str, int]] = None
+        self._invalid_rule_ids: List[str] = []
+        self._skipped_rule_ids: List[str] = []
+
         self._source_query_dq_output: Optional[List[dict]] = None
 
         self._target_query_dq_output: Optional[List[dict]] = None
@@ -2903,6 +2911,61 @@ class SparkExpectationsContext:
             dict: Returns querydq_secondary_queries
         """
         return self._querydq_secondary_queries
+
+    def set_rules_validation_policy_result(
+        self,
+        policy: Optional[str],
+        invalid_rule_stats: Optional[Dict[str, int]],
+        invalid_rule_ids: Optional[List[str]] = None,
+        skipped_rule_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Records the rule validation policy outcome for the current run.
+
+        Args:
+            policy: Canonical policy name, or None to clear the state.
+            invalid_rule_stats: Counts written to the "invalid_rules" entry of the
+                stats dq_rules map, or None to omit that entry.
+            invalid_rule_ids: Display identifiers of the invalid rule occurrences.
+            skipped_rule_ids: Display identifiers of the rule occurrences skipped in this run.
+        """
+        self._rules_validation_policy = policy
+        self._invalid_rule_stats = dict(invalid_rule_stats) if invalid_rule_stats is not None else None
+        self._invalid_rule_ids = list(invalid_rule_ids or [])
+        self._skipped_rule_ids = list(skipped_rule_ids or [])
+
+    @property
+    def get_rules_validation_policy(self) -> Optional[str]:
+        """
+        Returns:
+            Optional[str]: The rule validation policy applied to the current run
+        """
+        return self._rules_validation_policy
+
+    @property
+    def get_invalid_rule_stats(self) -> Optional[Dict[str, int]]:
+        """
+        Returns:
+            Optional[Dict[str, int]]: num_invalid_rules and num_skipped_rules for the current run,
+                or None if no rule validation policy was evaluated
+        """
+        return dict(self._invalid_rule_stats) if self._invalid_rule_stats is not None else None
+
+    @property
+    def get_invalid_rule_ids(self) -> List[str]:
+        """
+        Returns:
+            List[str]: Identifiers of the rule occurrences that failed validation in the current run
+        """
+        return list(self._invalid_rule_ids)
+
+    @property
+    def get_skipped_rule_ids(self) -> List[str]:
+        """
+        Returns:
+            List[str]: Identifiers of the rule occurrences skipped in the current run
+        """
+        return list(self._skipped_rule_ids)
 
     def set_source_query_dq_output(self, source_query_dq_output: Optional[List[dict]] = None) -> None:
         """
