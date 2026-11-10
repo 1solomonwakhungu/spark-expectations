@@ -99,5 +99,6 @@ class SparkExpectationsKafkaWritePluginImpl(SparkExpectationsSinkWriter):
         if failure_message is not None:
             # Raised outside the except block so the original exception, whose text
             # and traceback may contain Kafka option values, is not attached as
-            # __context__ or __cause__ and cannot leak through chained tracebacks.
-            raise SparkExpectationsMiscException(f"error occurred while saving data into kafka: {failure_message}")
+            # ordinary __context__ or __cause__. Suppress any ambient caller context
+            # in default traceback formatting as well.
+            raise SparkExpectationsMiscException(f"error occurred while saving data into kafka: {failure_message}") from None

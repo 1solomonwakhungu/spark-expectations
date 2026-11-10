@@ -9,6 +9,7 @@ import io
 import logging
 import traceback
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -282,3 +283,50 @@ def test_failure_never_renders_downstream_details(captured_log, detail):
     assert detail not in captured_log.getvalue()
     assert error.value.__context__ is None
     assert error.value.__cause__ is None
+
+
+def test_ambient_caller_exception_is_suppressed(captured_log):
+    try:
+        raise RuntimeError("AMBIENT_PRIVATE_SENTINEL")
+    except RuntimeError:
+        with pytest.raises(SparkExpectationsMiscException) as error:
+            SparkExpectationsKafkaWritePluginImpl().writer(
+                {"enable_se_streaming": True, "stats_df": _FakeDataFrame(_RecordingWriteBuilder(RuntimeError("private"))), "kafka_write_options": {}}
+            )
+        assert "AMBIENT_PRIVATE_SENTINEL" not in _full_exception_text(error.value)
+        assert error.value.__suppress_context__ is True
+
+
+def make_writer(monkeypatch, custom, version):
+    context=MagicMock()
+    context.get_run_date='2026-11-09 12:00:00'
+    context.get_run_id_name='run_id'; context.get_run_date_name='run_date'; context.get_run_date_time_name='run_time'
+    context.get_dq_rules_params={}; context.get_se_job_metadata={}
+    context.get_stats_table_writer_config={'format':'delta'}
+    context.get_se_streaming_stats_dict={writer_module.user_config.se_enable_streaming:True}
+    context.get_env='prod'; context.get_dbr_version=version
+    context.get_se_streaming_stats_kafka_custom_config_enable=custom
+    for attr in ['client_id','token','token_endpoint_url','server_url_key','topic_name']:
+        setattr(context,'get_'+attr,attr)
+    writer=writer_module.SparkExpectationsWriter(context)
+    df=MagicMock(); df.withColumn.return_value=df
+    writer.spark.createDataFrame.return_value=df
+    writer.save_df_as_table=MagicMock()
+    monkeypatch.setattr(writer_module,'sql_round',lambda *a:None); monkeypatch.setattr(writer_module,'lit',lambda *a:None)
+    return writer, context
+
+
+@pytest.mark.parametrize("custom,version", [(True, None), (False, "12.2"), (False, "14.3")])
+def test_secret_fetch_failure_does_not_reach_diagnostics(monkeypatch, captured_log, custom, version):
+    writer, context = make_writer(monkeypatch, custom, version)
+    class FailingBackend:
+        def __init__(self, config):
+            pass
+        def get_secret(self, key):
+            raise RuntimeError("BACKEND_PRIVATE_SENTINEL")
+    monkeypatch.setattr(writer_module, "SparkExpectationsSecretsBackend", FailingBackend)
+    with pytest.raises(SparkExpectationsMiscException) as error:
+        writer.write_error_stats()
+    notification = context.set_kafka_write_error_message.call_args.args[0]
+    assert "BACKEND_PRIVATE_SENTINEL" not in notification + captured_log.getvalue() + _full_exception_text(error.value)
+    context.set_kafka_write_status.assert_called_once_with("Failed")
