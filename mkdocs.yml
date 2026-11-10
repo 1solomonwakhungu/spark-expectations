@@ -85,6 +85,7 @@ nav:
   - Developer Guide:
       - Contributing: developer_guide/contributing.md
       - Development Setup: developer_guide/setup.md
+      - CI and Release: developer_guide/release.md
   - Python API:
       - Core:
           - Init: api/core_init.md
