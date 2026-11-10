@@ -77,9 +77,9 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
                 try:
                     password = self._retrieve_password(secret_handler, secret_type, smtp_secret_dict)
                 except KeyError:
-                    raise SparkExpectationsEmailException("SMTP password key is missing in the secret.")
-                except Exception as e:
-                    raise SparkExpectationsEmailException("   Failed to retrieve SMTP password.") from e
+                    raise SparkExpectationsEmailException("SMTP password key is missing in the secret.") from None
+                except Exception:
+                    raise SparkExpectationsEmailException("Failed to retrieve SMTP password.") from None
 
         if password is None:
             raise SparkExpectationsEmailException("SMTP password is not set.")
@@ -251,7 +251,15 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
 
                 _log.info("email sent successfully")
 
-        except Exception as e:
+        except Exception as error:
+            # SMTP peers and secret providers can include credentials in their errors.
+            # Only fixed categories are safe for logs and default traceback formatting.
+            if isinstance(error, ssl.SSLCertVerificationError):
+                reason = "certificate verify failed"
+            elif isinstance(error, smtplib.SMTPNotSupportedError):
+                reason = "SMTP STARTTLS or authentication capability unavailable"
+            else:
+                reason = "SMTP operation failed; downstream error details withheld"
             raise SparkExpectationsEmailException(
-                f"error occurred while sending email notification from spark expectations project {e}"
-            ) from e
+                f"error occurred while sending email notification from spark expectations project: {reason}"
+            ) from None

@@ -17,7 +17,9 @@ import threading
 import time
 from types import SimpleNamespace
 from typing import List, Optional, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import traceback
+import smtplib
 
 import pytest
 
@@ -102,7 +104,7 @@ class _TestCA:
         self.cert = os.path.join(directory, "ca.crt")
         _openssl(
             "req", "-x509", "-new", "-config", self.config, "-extensions", "v3_ca",
-            "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
+            "-newkey", "rsa:2048", "-nodes",
             "-keyout", os.path.join(directory, "ca.key"), "-out", self.cert,
             "-days", "30", "-subj", f"/CN={name}",
         )  # fmt: skip
@@ -113,8 +115,7 @@ class _TestCA:
         csr = os.path.join(self.dir, f"{name}.csr")
         cert = os.path.join(self.dir, f"{name}.crt")
         _openssl(
-            "req", "-new", "-config", self.config, "-newkey", "ec",
-            "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
+            "req", "-new", "-config", self.config, "-newkey", "rsa:2048", "-nodes",
             "-keyout", key, "-out", csr, "-subj", f"/CN={name}",
         )  # fmt: skip
         args = ["ca", "-batch", "-notext", "-config", self.config, "-extensions", extensions, "-in", csr, "-out", cert]
@@ -290,7 +291,8 @@ def test_bad_certificate_fails_before_login(pki, certificate, tls_mode):
         with pytest.raises(SparkExpectationsEmailException) as excinfo:
             _send(_synthetic_context(server.port, pki.ca_file, tls_mode=tls_mode))
 
-    assert isinstance(excinfo.value.__cause__, ssl.SSLCertVerificationError)
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__suppress_context__ is True
     assert "certificate verify failed" in str(excinfo.value)
     assert server.auth_payloads == []
     assert server.messages == []
@@ -303,7 +305,8 @@ def test_system_trust_store_rejects_private_ca_by_default(pki):
         with pytest.raises(SparkExpectationsEmailException) as excinfo:
             _send(_synthetic_context(server.port, ca_file=None))
 
-    assert isinstance(excinfo.value.__cause__, ssl.SSLCertVerificationError)
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__suppress_context__ is True
     assert server.auth_payloads == []
 
 
@@ -348,14 +351,14 @@ def test_unresponsive_server_times_out():
     finally:
         listener.close()
 
-    # smtplib reports a greeting timeout as SMTPServerDisconnected("... timed out").
-    assert "timed out" in str(excinfo.value)
+    # Downstream text is withheld; elapsed time establishes the timeout.
+    assert "downstream error details withheld" in str(excinfo.value)
     assert elapsed < 5
     _assert_no_password(str(excinfo.value))
 
 
 def test_unsupported_tls_mode_is_rejected_before_connecting():
-    with pytest.raises(SparkExpectationsEmailException, match="Unsupported SMTP TLS mode"):
+    with pytest.raises(SparkExpectationsEmailException, match="downstream error details withheld"):
         # Port 9 on loopback is never contacted because the mode is checked first.
         _send(_synthetic_context(9, ca_file=None, tls_mode="none"))
 
@@ -409,3 +412,29 @@ def test_context_ca_file(se_context, tmp_path):
     assert se_context.get_mail_smtp_ca_file is None
     with pytest.raises(SparkExpectationsMiscException, match="SMTP CA file"):
         se_context.set_mail_smtp_ca_file(str(tmp_path / "missing.pem"))
+
+
+@pytest.mark.parametrize("failure", ["smtp", "provider", "provider_keyerror", "ambient"])
+def test_secret_errors_are_not_formatted(failure):
+    plugin = SparkExpectationsEmailPluginImpl()
+    context = _synthetic_context(9, None)
+    server = MagicMock()
+    sentinel = "SYNTHETIC_PRIVATE_ERROR"
+    context.get_mail_smtp_password = sentinel
+    if failure in ("provider", "provider_keyerror"):
+        context.get_mail_smtp_password = None
+    # Use the actual configured secret selector rather than a provider connection.
+    from spark_expectations.config.user_config import Constants
+    context.get_smtp_creds_dict = {Constants.secret_type: "cerberus"}
+    error = KeyError(sentinel) if failure == "provider_keyerror" else RuntimeError(sentinel)
+    server.login.side_effect = smtplib.SMTPAuthenticationError(535, sentinel.encode())
+    with patch.object(plugin, "_connect_smtp", return_value=server), patch.object(plugin, "_retrieve_password", side_effect=error):
+        try:
+            raise RuntimeError("AMBIENT_PRIVATE_ERROR")
+        except RuntimeError:
+            with pytest.raises(SparkExpectationsEmailException) as caught:
+                plugin.send_notification(context, _CONFIG_ARGS)
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert sentinel not in rendered
+    assert "AMBIENT_PRIVATE_ERROR" not in rendered
+    server.sendmail.assert_not_called()
