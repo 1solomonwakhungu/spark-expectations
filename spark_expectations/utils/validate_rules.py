@@ -368,6 +368,11 @@ class SparkExpectationsValidateRules:
             First part of the composite query is called static until the first delimiter with place holders {}. ((select count(*) from ({source_f1}) a) - (select count(*) from ({target_f1}) b)) < 3. 
             Second part, the composite query, is called dynamic with delimiter(s) followed with subquerie(s):  @source_f1@select ...@target_f1@select ...
             These subqueries will be placed in the static query for the matching placeholder(s).
+
+        Queries may span multiple lines (LF or CRLF) and use indentation or tabs. The SELECT ... FROM
+        checks match across line breaks without rewriting the query text.
+        A successful result means the query passed these syntax checks; it does not guarantee that
+        the query will execute successfully against the data.
         """
         raw = rule.get("expectation", "")
         delimiter = rule.get("query_dq_delimiter") or "@"
@@ -381,7 +386,7 @@ class SparkExpectationsValidateRules:
             dynamic_query_kv_pairs = {dynamic_query_list[i].strip(): dynamic_query_list[i + 1].strip() for i in range(0, len(dynamic_query_list), 2)}
             # Validate each subquery and Ensure it's a SELECT ... FROM ... query
             for key, subquery in dynamic_query_kv_pairs.items():
-                if not re.search(r"\bselect\b.*\bfrom\b", subquery, re.IGNORECASE):
+                if not re.search(r"\bselect\b.*\bfrom\b", subquery, re.IGNORECASE | re.DOTALL):
                     error_msg = f"[query_dq] Subquery '{subquery}' for key '{key}' is not a valid SELECT ... FROM:"
                     if raise_exception:
                         raise SparkExpectationsInvalidQueryDQExpectationException(error_msg)
@@ -413,7 +418,7 @@ class SparkExpectationsValidateRules:
         else:
             # --- Simple Query path with no place holders {} and delimiter(s) ---
             query = raw
-            if not re.search(r"\bselect\b.*\bfrom\b", query, re.IGNORECASE):
+            if not re.search(r"\bselect\b.*\bfrom\b", query, re.IGNORECASE | re.DOTALL):
                 error_msg = f"[query_dq] Expectation does not appear to be a valid SQL SELECT query: '{query}'"
                 if raise_exception:
                     raise SparkExpectationsInvalidQueryDQExpectationException(error_msg)
