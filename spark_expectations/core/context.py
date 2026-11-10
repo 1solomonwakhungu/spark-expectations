@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+import math
 import os
 from importlib import metadata
 from datetime import timezone
@@ -21,6 +22,14 @@ from spark_expectations.config.rest_streaming_defaults import (
 )
 from spark_expectations.config.user_config import Constants as user_config
 from spark_expectations.core.exceptions import SparkExpectationsMiscException
+
+# SMTP transport security settings. Certificate and hostname verification are always enabled.
+SMTP_TLS_MODE_STARTTLS = "starttls"
+SMTP_TLS_MODE_SSL = "ssl"
+SMTP_TLS_MODES = (SMTP_TLS_MODE_STARTTLS, SMTP_TLS_MODE_SSL)
+DEFAULT_SMTP_TLS_MODE = SMTP_TLS_MODE_STARTTLS
+DEFAULT_SMTP_TIMEOUT_SEC = 30.0
+MAX_SMTP_TIMEOUT_SEC = 300.0
 
 
 # TODO: Add exceptions to follow standardized naming conventions for _run_id, product_id and _dq_stats_table_name in
@@ -87,6 +96,9 @@ class SparkExpectationsContext:
         self._mail_smtp_port: int
         self._mail_smtp_password: Optional[str] = None
         self._mail_smtp_user_name: Optional[str] = None
+        self._mail_smtp_tls_mode: str = DEFAULT_SMTP_TLS_MODE
+        self._mail_smtp_ca_file: Optional[str] = None
+        self._mail_smtp_timeout: float = DEFAULT_SMTP_TIMEOUT_SEC
         self._smtp_creds_dict: Dict[str, str] = {}
         self._email_custom_body: Optional[str] = None
 
@@ -971,6 +983,92 @@ class SparkExpectationsContext:
             str: _mail_smtp_user_name or None if not set
         """
         return self._mail_smtp_user_name
+
+    def set_mail_smtp_tls_mode(self, mail_smtp_tls_mode: Optional[Any]) -> None:
+        """
+        Sets how the SMTP connection is secured. Certificates and hostnames are verified in every mode.
+
+        Args:
+            mail_smtp_tls_mode: "starttls" (plain connection upgraded with STARTTLS, the default) or
+                "ssl" (implicit TLS / SMTPS). None or an empty value selects the default.
+        Raises:
+            SparkExpectationsMiscException: if the mode is not supported
+        """
+        if mail_smtp_tls_mode is None or str(mail_smtp_tls_mode).strip() == "":
+            self._mail_smtp_tls_mode = DEFAULT_SMTP_TLS_MODE
+            return
+        mode = str(mail_smtp_tls_mode).strip().lower()
+        if mode not in SMTP_TLS_MODES:
+            raise SparkExpectationsMiscException(
+                f"Unsupported SMTP TLS mode {mail_smtp_tls_mode!r}; expected one of {', '.join(SMTP_TLS_MODES)}"
+            )
+        self._mail_smtp_tls_mode = mode
+
+    @property
+    def get_mail_smtp_tls_mode(self) -> str:
+        """
+        Returns the SMTP TLS mode ("starttls" or "ssl")
+        """
+        return self._mail_smtp_tls_mode
+
+    def set_mail_smtp_ca_file(self, mail_smtp_ca_file: Optional[Any]) -> None:
+        """
+        Sets a PEM CA bundle used to verify the SMTP server certificate instead of the system trust store.
+
+        Args:
+            mail_smtp_ca_file: path to a readable PEM file, or None/empty to use the system trust store
+        Raises:
+            SparkExpectationsMiscException: if the path is not an existing file
+        """
+        if mail_smtp_ca_file is None or str(mail_smtp_ca_file).strip() == "":
+            self._mail_smtp_ca_file = None
+            return
+        ca_file = str(mail_smtp_ca_file).strip()
+        if not os.path.isfile(ca_file):
+            raise SparkExpectationsMiscException(f"SMTP CA file {ca_file!r} does not exist or is not a file")
+        self._mail_smtp_ca_file = ca_file
+
+    @property
+    def get_mail_smtp_ca_file(self) -> Optional[str]:
+        """
+        Returns the SMTP CA bundle path, or None when the system trust store is used
+        """
+        return self._mail_smtp_ca_file
+
+    def set_mail_smtp_timeout(self, mail_smtp_timeout: Optional[Any]) -> None:
+        """
+        Sets the socket timeout in seconds for the SMTP connection and each SMTP operation.
+
+        Args:
+            mail_smtp_timeout: finite number of seconds, 0 < timeout <= 300. None or an empty value
+                selects the default of 30 seconds.
+        Raises:
+            SparkExpectationsMiscException: if the value is not a finite number in range
+        """
+        if mail_smtp_timeout is None or (isinstance(mail_smtp_timeout, str) and mail_smtp_timeout.strip() == ""):
+            self._mail_smtp_timeout = DEFAULT_SMTP_TIMEOUT_SEC
+            return
+        try:
+            if isinstance(mail_smtp_timeout, bool):
+                raise ValueError("boolean is not a timeout")
+            timeout = float(mail_smtp_timeout)
+        except (TypeError, ValueError) as e:
+            raise SparkExpectationsMiscException(
+                f"SMTP timeout must be a number of seconds, got {mail_smtp_timeout!r}"
+            ) from e
+        if not math.isfinite(timeout) or timeout <= 0 or timeout > MAX_SMTP_TIMEOUT_SEC:
+            raise SparkExpectationsMiscException(
+                f"SMTP timeout must be greater than 0 and at most {MAX_SMTP_TIMEOUT_SEC:g} seconds, "
+                f"got {mail_smtp_timeout!r}"
+            )
+        self._mail_smtp_timeout = timeout
+
+    @property
+    def get_mail_smtp_timeout(self) -> float:
+        """
+        Returns the SMTP socket timeout in seconds
+        """
+        return self._mail_smtp_timeout
 
     def set_smtp_creds_dict(self, smtp_creds_dict: Dict[str, str]) -> None:
         """

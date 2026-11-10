@@ -27,6 +27,9 @@ By default email notifications are disabled. To use them we need to pass require
 
     - <abbr title="SMTP host for sending emails">user_config.se_notifications_email_smtp_host</abbr>
     - <abbr title="SMTP port for sending emails">user_config.se_notifications_email_smtp_port</abbr>
+    - <abbr title="starttls (default) or ssl; certificates are always verified">user_config.se_notifications_email_smtp_tls_mode</abbr>
+    - <abbr title="PEM CA bundle that replaces the system trust store">user_config.se_notifications_email_smtp_ca_file</abbr>
+    - <abbr title="Connection and per-command timeout in seconds (default 30, max 300)">user_config.se_notifications_email_smtp_timeout</abbr>
 
 
 ??? info "Email Content"
@@ -47,6 +50,28 @@ By default email notifications are disabled. To use them we need to pass require
 
 
 
+### SMTP Transport Security
+
+Spark-Expectations always encrypts the SMTP connection and verifies the server before it sends credentials or mail:
+
+- The server certificate must chain to a trusted CA and must match the configured SMTP host name.
+  An untrusted, expired, or wrong-host certificate stops the notification before `login` is called.
+- `user_config.se_notifications_email_smtp_tls_mode` selects how TLS starts:
+    - `starttls` (default): connect in plain text, then upgrade with `STARTTLS`, typically on port 587 or 25.
+      If the server does not offer `STARTTLS`, sending fails; there is no plaintext fallback.
+    - `ssl`: implicit TLS (SMTPS), typically on port 465.
+- `user_config.se_notifications_email_smtp_ca_file` points to a PEM CA bundle for servers whose certificate is issued
+  by a private or corporate CA. The bundle replaces the system trust store for SMTP. Do not use it to trust a
+  certificate whose host name does not match `se_notifications_email_smtp_host`; reissue the certificate with the
+  correct subject alternative name instead.
+- `user_config.se_notifications_email_smtp_timeout` bounds the connection and every SMTP command (default 30 seconds,
+  allowed range greater than 0 up to 300).
+
+!!! warning "Local test mail servers"
+    A self-signed development server, such as the bundled Mailpit container, is rejected unless its certificate lists
+    the host name you connect to (for example `mailpit` or `localhost`) as a subject alternative name and you pass the
+    issuing certificate in `user_config.se_notifications_email_smtp_ca_file`.
+
 ### Configure SMTP Notifications
 
 To enable email notifications (such as alerts for data quality failures) in Spark-Expectations, you need to configure SMTP settings. 
@@ -61,12 +86,14 @@ Before using SMTP notifications, verify that the following parameters are set co
 - SMTP password
 - Sender email address (`from`)
 - Recipient email address(es) (`to`)
-- Enable/disable SMTP authentication and TLS as needed
+- SMTP authentication settings and verified TLS mode (`starttls` or `ssl`)
 
 ??? info "Sample Python Script to Send a Test Email"
 
     You can use the following Python script to test your SMTP configuration. This script will send a test email using the configured SMTP settings. Make sure to replace the placeholders with your actual SMTP configuration values.
     ```python
+    import smtplib
+    import ssl
     from email.mime.text import MIMEText
 
     smtp_host = "smtp.example.com"
@@ -81,8 +108,11 @@ Before using SMTP notifications, verify that the following parameters are set co
     msg["From"] = smtp_from
     msg["To"] = smtp_to
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
+    # Verifies the certificate chain and host name; pass cafile="/path/to/ca.pem" for a private CA
+    tls_context = ssl.create_default_context()
+
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+        server.starttls(context=tls_context)
         server.login(smtp_user, smtp_password)
         server.sendmail(smtp_from, [smtp_to], msg.as_string())
 
@@ -111,6 +141,8 @@ Make sure your SMTP server allows connections from your environment (some provid
         # Email notification server config
         user_config.se_notifications_email_smtp_host: "mailpit",
         user_config.se_notifications_email_smtp_port: 1025,
+        # Certificates are verified; trust the local Mailpit CA explicitly
+        user_config.se_notifications_email_smtp_ca_file: "/app/spark_expectations/containers/certs/mailpit-ca.crt",
         
         # Email headers (sender, receiver, subject)
         user_config.se_notifications_email_from: "sender@example.com",
