@@ -2,6 +2,8 @@
 # Generate a private development CA and a server certificate for the local stack.
 set -eu
 umask 077
+# Python provides exact-path hard links on both macOS and Linux.
+command -v python3 >/dev/null
 output=${1:-containers/certs}
 if [ ! -d "$output" ]; then
     mkdir -p "$output"
@@ -44,13 +46,16 @@ openssl req -new -newkey rsa:2048 -nodes -keyout "$scratch/server.key" \
 openssl x509 -req -in "$scratch/server.csr" -CA "$scratch/ca.crt" \
     -CAkey "$scratch/ca.key" -CAcreateserial -days 30 \
     -extfile "$scratch/extensions.cnf" -out "$scratch/server.crt" 2>/dev/null
-# Hard links atomically refuse existing files, including dangling symlinks.
+# Exact-path hard links refuse existing entries, including directories and symlinks.
 # Staging under the destination keeps the files on the same filesystem.
-ln "$scratch/ca.crt" "$output/mailpit-ca.crt"
+link_exact() {
+    python3 -c 'import os, sys; os.link(sys.argv[1], sys.argv[2])' "$1" "$2"
+}
+link_exact "$scratch/ca.crt" "$output/mailpit-ca.crt"
 published="mailpit-ca.crt"
-ln "$scratch/server.crt" "$output/mailpit.crt"
+link_exact "$scratch/server.crt" "$output/mailpit.crt"
 published="$published mailpit.crt"
-ln "$scratch/server.key" "$output/mailpit.key"
+link_exact "$scratch/server.key" "$output/mailpit.key"
 published="$published mailpit.key"
 chmod 644 "$output/mailpit-ca.crt" "$output/mailpit.crt"
 completed=true

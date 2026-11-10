@@ -67,9 +67,9 @@ def test_partial_publication_is_rolled_back(tmp_path):
         pytest.skip("openssl is required")
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    real_ln = shutil.which("ln")
-    stub = bindir / "ln"
-    stub.write_text('#!/bin/sh\ncase "$2" in */mailpit.crt) exit 1;; esac\nexec "' + real_ln + '" "$@"\n')
+    real_python = shutil.which("python3")
+    stub = bindir / "python3"
+    stub.write_text('#!/bin/sh\ncase "$4" in */mailpit.crt) exit 1;; esac\nexec "' + real_python + '" "$@"\n')
     stub.chmod(0o755)
     output = tmp_path / "certs"
     env = {"PATH": str(bindir) + os.pathsep + os.environ["PATH"], "HOME": str(tmp_path)}
@@ -77,3 +77,29 @@ def test_partial_publication_is_rolled_back(tmp_path):
     assert result.returncode != 0
     assert list(output.iterdir()) == []
     assert output.stat().st_mode & 0o777 == 0o755
+
+
+@pytest.mark.parametrize("name", ["mailpit-ca.crt", "mailpit.crt", "mailpit.key"])
+def test_publication_rejects_late_directory(tmp_path, name):
+    if not shutil.which("openssl"):
+        pytest.skip("openssl is required")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    real_python = shutil.which("python3")
+    stub = bindir / "python3"
+    stub.write_text(
+        '#!/bin/sh\ncase "$4" in */' + name + ') mkdir "$4";; esac\n'
+        + 'exec "' + real_python + '" "$@"\n'
+    )
+    stub.chmod(0o755)
+    output = tmp_path / "certs"
+    env = {"PATH": str(bindir) + os.pathsep + os.environ["PATH"], "HOME": str(tmp_path)}
+    command = ["sh", str(ROOT / "containers/mailserver/generate-certs.sh"), str(output)]
+    result = subprocess.run(command, env=env, capture_output=True)
+    assert result.returncode != 0
+    assert "Created development" not in result.stdout.decode()
+    assert list(output.iterdir()) == [output / name]
+    assert list((output / name).iterdir()) == []
+    (output / name).rmdir()
+    env["PATH"] = os.environ["PATH"]
+    subprocess.run(command, env=env, check=True, capture_output=True)
