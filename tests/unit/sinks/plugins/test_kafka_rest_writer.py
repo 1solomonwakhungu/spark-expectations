@@ -548,3 +548,11 @@ def test_error_helper_suppresses_ambient_context():
         with pytest.raises(SparkExpectationsMiscException) as caught:
             SparkExpectationsKafkaRestWritePluginImpl._raise_for_record_errors(_response(500), "test")
     assert "AMBIENT_PRIVATE_SENTINEL" not in "".join(traceback.format_exception(caught.value))
+
+
+def test_byte_limits_preserve_integer_precision():
+    from spark_expectations.sinks.plugins.kafka_rest_writer import _resolve_max_record_bytes
+    assert _resolve_max_record_bytes({"max_record_bytes": "9007199254740993"}) == 9007199254740993
+    for value in ("1.0000000000000001", "9007199254740993.1", "1e10000"):
+        with pytest.raises(SparkExpectationsMiscException, match="max_record_bytes"):
+            _resolve_max_record_bytes({"max_record_bytes": value})

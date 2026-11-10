@@ -1,5 +1,6 @@
 import json
 import math
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import requests
@@ -147,9 +148,17 @@ def _resolve_max_retry_after(rest_options: Dict[str, Any]) -> float:
 
 
 def _resolve_max_record_bytes(rest_options: Dict[str, Any]) -> int:
-    value = _positive_number_option(rest_options, "max_record_bytes", DEFAULT_REST_MAX_RECORD_BYTES, False)
-    if not value.is_integer():
-        raise SparkExpectationsMiscException("invalid kafka REST option 'max_record_bytes': expected a positive integer") from None
+    raw = rest_options.get("max_record_bytes", DEFAULT_REST_MAX_RECORD_BYTES)
+    try:
+        value = Decimal(str(raw))
+        valid = not isinstance(raw, bool) and value.is_finite() and 0 < value <= 9223372036854775807
+        valid = valid and value == value.to_integral_value()
+    except (InvalidOperation, ValueError, TypeError):
+        valid = False
+    if not valid:
+        raise SparkExpectationsMiscException(
+            "invalid kafka REST option 'max_record_bytes': expected an integer between 1 and 9223372036854775807"
+        ) from None
     return int(value)
 
 

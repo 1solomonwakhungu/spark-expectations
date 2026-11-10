@@ -51,7 +51,7 @@ These keys are read from `rest_write_options`:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `max_record_bytes` | `1048576` (1 MiB) | Largest request body allowed. A larger record fails the write before it is sent. |
+| `max_record_bytes` | `1048576` (1 MiB) | Largest request body allowed, as an integer from 1 through 9223372036854775807. A larger record fails the write before it is sent. |
 | `max_retry_after_sec` | `30` | Longest the writer waits for a single `Retry-After` header. Larger values are reduced to this. `0` disables Retry-After sleeping; exponential backoff still applies. |
 | `max_retries` | `3` | Retries per record for connection, read and retryable-status failures. `0` disables retries. |
 | `backoff_factor` | `0.5` | Exponential backoff between retries when no positive Retry-After delay is applied. |
