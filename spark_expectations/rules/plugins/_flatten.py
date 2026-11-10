@@ -37,12 +37,14 @@ A simpler format without ``dq_env`` is also supported, using a top-level
         expectation: "col1 IS NOT NULL"
 """
 
-from typing import Any, Dict, List, Optional
+import numbers
+from typing import Any, Dict, List, Optional, Tuple
 
 from pyspark.sql import DataFrame
 from pyspark.sql.session import SparkSession
 from pyspark.sql.types import BooleanType, DataType, IntegerType, StringType, StructField, StructType
 
+from spark_expectations import _log
 from spark_expectations.core.exceptions import SparkExpectationsUserInputOrConfigInvalidException
 
 VALID_RULE_TYPES = {"row_dq", "agg_dq", "query_dq"}
@@ -96,6 +98,16 @@ INT_COLUMNS = {
 }
 
 REQUIRED_RULE_FIELDS = {"rule", "expectation"}
+
+# String spellings (compared case-insensitively) that boolean columns map
+# to True or False on purpose.  Any other string is cast to False and
+# reported with a warning.
+TRUE_BOOLEAN_STRINGS = ("true", "1", "yes")
+FALSE_BOOLEAN_STRINGS = ("false", "0", "no")
+
+# Upper bound on how many characters of a value or identifier are echoed
+# in a coercion warning.
+_MAX_DIAGNOSTIC_REPR_LENGTH = 80
 
 
 def _col_type(col: str) -> DataType:
@@ -185,9 +197,12 @@ def flatten_rules_list(
         table_name = env_config.get("table_name", "")
         env_defaults = {k: v for k, v in env_config.items() if k != "table_name"}
         user_defaults = {**(data.get("defaults") or {}), **env_defaults}
+        env_key = {k.lower(): k for k in dq_env}[env_lower]
+        default_sources = [(f"dq_env.{env_key}", env_defaults), ("defaults", data.get("defaults") or {})]
     else:
         table_name = data.get("table_name", "")
         user_defaults = data.get("defaults") or {}
+        default_sources = [("defaults", user_defaults)]
 
     merged_defaults = {**COLUMN_DEFAULTS, **user_defaults}
 
@@ -227,12 +242,85 @@ def flatten_rules_list(
                 f"Must be one of {sorted(VALID_RULE_TYPES)}."
             )
 
+        _warn_lossy_coercions(row, [("rule definition", rule_def), *default_sources])
         rows.append(_normalise_row(row))
 
     return rows
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
+
+
+def _short_repr(value: Any) -> str:
+    """Return ``repr(value)`` truncated to a bounded length for log messages."""
+    text = repr(value)
+    if len(text) > _MAX_DIAGNOSTIC_REPR_LENGTH:
+        return text[: _MAX_DIAGNOSTIC_REPR_LENGTH - 3] + "..."
+    return text
+
+
+def _describe_lossy_coercion(col: str, value: Any) -> Optional[str]:
+    """Describe how ``_cast_value`` would silently change *value*, if at all.
+
+    Returns ``None`` when the value is either already of the expected type,
+    a recognised spelling, ``None`` (column default), or a value that
+    ``_cast_value`` rejects with an error anyway.  Otherwise returns a short
+    human-readable explanation of the lossy conversion.  The value itself is
+    never modified.
+    """
+    if value is None:
+        return None
+
+    if col in BOOLEAN_COLUMNS:
+        if not isinstance(value, str):
+            return None
+        lowered = value.lower()
+        if lowered in TRUE_BOOLEAN_STRINGS or lowered in FALSE_BOOLEAN_STRINGS:
+            return None
+        message = f"unrecognized boolean string {_short_repr(value)} is treated as False"
+        stripped = value.strip().lower()
+        if stripped in TRUE_BOOLEAN_STRINGS or stripped in FALSE_BOOLEAN_STRINGS:
+            return f"{message}; remove the surrounding whitespace"
+        return (
+            f"{message}; use true or false (recognized strings, case-insensitive: "
+            f"{', '.join(repr(s) for s in TRUE_BOOLEAN_STRINGS + FALSE_BOOLEAN_STRINGS)})"
+        )
+
+    if col in INT_COLUMNS:
+        if isinstance(value, (bool, str, numbers.Integral)) or not isinstance(value, numbers.Number):
+            return None
+        try:
+            truncated = int(value)
+        except (ArithmeticError, ValueError, TypeError):
+            return None
+        if value == truncated:
+            return None
+        return f"fractional value {_short_repr(value)} is truncated to {truncated}; use a whole number"
+
+    return None
+
+
+def _warn_lossy_coercions(row: Dict[str, Any], sources: List[Tuple[str, Dict[str, Any]]]) -> None:
+    """Log one warning per boolean/integer field whose value would be lossily cast.
+
+    *sources* lists ``(label, mapping)`` pairs in precedence order, and the
+    first mapping containing the field names where the value was set.  This
+    lets a value inherited from ``defaults`` or ``dq_env`` be traced to both
+    the rule it ended up in and the block that supplied it.
+    """
+    for col in RULES_SCHEMA_COLUMNS:
+        if col not in BOOLEAN_COLUMNS and col not in INT_COLUMNS:
+            continue
+        value = row.get(col)
+        problem = _describe_lossy_coercion(col, value)
+        if problem is None:
+            continue
+        origin = next((label for label, mapping in sources if col in mapping), "built-in defaults")
+        _log.warning(
+            f"Rules file field '{col}' for rule {_short_repr(row.get('rule'))} "
+            f"(product_id={_short_repr(row.get('product_id'))}, "
+            f"table_name={_short_repr(row.get('table_name', ''))}, set in {origin}): {problem}."
+        )
 
 
 def _normalise_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,7 +340,7 @@ def _cast_value(col: str, value: Any) -> Any:
     if col in BOOLEAN_COLUMNS:
         if isinstance(value, bool):
             return value
-        return value.lower() in ("true", "1", "yes") if isinstance(value, str) else bool(value)
+        return value.lower() in TRUE_BOOLEAN_STRINGS if isinstance(value, str) else bool(value)
 
     if col in INT_COLUMNS:
         try:
