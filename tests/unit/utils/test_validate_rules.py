@@ -1027,3 +1027,210 @@ class TestValidateActionIfFailed:
             rule = {"rule": "test_rule", "rule_type": "row_dq", "action_if_failed": action}
             result = SparkExpectationsValidateRules.validate_action_if_failed(rule)
             assert result.is_valid is False, f"Expected '{action}' to be invalid (case-sensitive)"
+
+
+MULTILINE_SIMPLE_VALID = [
+    pytest.param("(select count(*) from synthetic_values) > 2", id="single_line_baseline"),
+    pytest.param("(select count(*)\nfrom synthetic_values) > 2", id="lf"),
+    pytest.param("(select count(*)\r\nfrom synthetic_values) > 2", id="crlf"),
+    pytest.param(
+        "(\n    select count(*)\n    from synthetic_values\n    where col1 is not null\n) > 2",
+        id="indented",
+    ),
+    pytest.param("(\tselect\tcount(*)\n\tfrom\tsynthetic_values) > 2", id="tabs"),
+    pytest.param("(SELECT count(*)\r\n  FROM synthetic_values\r\n  WHERE col1 > 0) > 2", id="uppercase_crlf"),
+    pytest.param("\n(select count(*)\nfrom synthetic_values) > 2\n", id="leading_trailing_newlines"),
+    pytest.param("(select sum(col1)\nfrom {table}) > 10", id="placeholder_lf"),
+    pytest.param(
+        "(select count(*)\nfrom synthetic_values\nwhere col2 <> 'line one\nline two') > 2",
+        id="newline_inside_string_literal",
+    ),
+]
+
+MULTILINE_COMPOSITE_VALID = [
+    pytest.param(
+        "((select count(*) from ({source_f1}) a) - (select count(*) from ({target_f1}) b)) < 3"
+        "@source_f1@select distinct product_id from order_source"
+        "@target_f1@select distinct product_id from order_target",
+        None,
+        id="single_line_baseline",
+    ),
+    pytest.param(
+        "((select count(*) from ({source_f1}) a)\n - (select count(*) from ({target_f1}) b)) < 3\n"
+        "@source_f1@select distinct product_id\nfrom order_source\n"
+        "@target_f1@select distinct product_id\nfrom order_target",
+        None,
+        id="lf_default_delimiter",
+    ),
+    pytest.param(
+        "((select count(*) from ({source_f1}) a)\r\n\t- (select count(*) from ({target_f1}) b)) < 3\r\n"
+        "$source_f1$\r\n\tselect product_id\r\n\tfrom order_source\r\n"
+        "$target_f1$\r\n\tselect product_id\r\n\tfrom order_target",
+        "$",
+        id="crlf_tabs_custom_delimiter",
+    ),
+    pytest.param(
+        "((select count(*) from ({source_f1}) a) - (select count(*) from ({target_f1}) b)) < 3"
+        "|source_f1|\n    select product_id\n    from order_source\n"
+        "|target_f1|(\n    select product_id\n    from order_target\n)",
+        "|",
+        id="indented_and_parenthesized_subqueries",
+    ),
+]
+
+MULTILINE_SIMPLE_MISSING_SELECT_FROM = [
+    pytest.param("count(*)\nfrom synthetic_values", id="missing_select_lf"),
+    pytest.param("select count(*)\nwhere col1 > 0", id="missing_from_lf"),
+    pytest.param("select count(*)\r\n\twhere col1 > 0", id="missing_from_crlf_tab"),
+    pytest.param("col1 > 10\r\nand col2 < 5", id="row_expression_crlf"),
+]
+
+MULTILINE_COMPOSITE_SUBQUERY_MISSING_SELECT_FROM = [
+    pytest.param(
+        "((select count(*) from ({source_f1}) a)) < 3@source_f1@select col1\nwhere col1 > 10",
+        id="subquery_missing_from_lf",
+    ),
+    pytest.param(
+        "((select count(*) from ({source_f1}) a)) < 3@source_f1@col1\r\nfrom order_source",
+        id="subquery_missing_select_crlf",
+    ),
+]
+
+MULTILINE_MALFORMED = [
+    pytest.param("(select count(*)\nfrom synthetic_values\nwhere col1 = = = 1) > 2", id="simple_lf"),
+    pytest.param("(select count(*)\r\n\tfrom synthetic_values\r\n\twhere col1 = = 1) > 2", id="simple_crlf_tabs"),
+    pytest.param(
+        "((select count(*) from ({source_f1}) a)\n  - ) < 3@source_f1@select col1\nfrom order_source",
+        id="composite_lf",
+    ),
+]
+
+
+class TestValidateQueryDqExpectationMultiline:
+    """Unit tests for multi-line query_dq expectations (LF/CRLF line breaks, indentation and tabs)."""
+
+    @pytest.fixture
+    def mock_df(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_spark(self):
+        return MagicMock()
+
+    @pytest.mark.parametrize("raise_exception", [False, True])
+    @pytest.mark.parametrize("expectation", MULTILINE_SIMPLE_VALID)
+    def test_simple_query_is_valid(self, mock_df, mock_spark, expectation, raise_exception):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_simple"}
+        result = SparkExpectationsValidateRules.validate_query_dq_expectation(
+            mock_df, rule, mock_spark, raise_exception=raise_exception
+        )
+        assert result.is_valid is True
+        assert result.error_message is None
+        assert result.rule_type == "query_dq"
+
+    @pytest.mark.parametrize("raise_exception", [False, True])
+    @pytest.mark.parametrize("expectation, delimiter", MULTILINE_COMPOSITE_VALID)
+    def test_composite_query_is_valid(self, mock_df, mock_spark, expectation, delimiter, raise_exception):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_composite"}
+        if delimiter is not None:
+            rule["query_dq_delimiter"] = delimiter
+        result = SparkExpectationsValidateRules.validate_query_dq_expectation(
+            mock_df, rule, mock_spark, raise_exception=raise_exception
+        )
+        assert result.is_valid is True
+        assert result.error_message is None
+
+    @pytest.mark.parametrize("expectation", MULTILINE_SIMPLE_MISSING_SELECT_FROM)
+    def test_simple_query_missing_select_or_from_returns_invalid(self, mock_df, mock_spark, expectation):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_not_query"}
+        result = SparkExpectationsValidateRules.validate_query_dq_expectation(mock_df, rule, mock_spark)
+        assert result.is_valid is False
+        assert "does not appear to be a valid SQL SELECT query" in result.error_message
+
+    @pytest.mark.parametrize("expectation", MULTILINE_SIMPLE_MISSING_SELECT_FROM)
+    def test_simple_query_missing_select_or_from_raises(self, mock_df, mock_spark, expectation):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_not_query"}
+        with pytest.raises(SparkExpectationsInvalidQueryDQExpectationException) as exc_info:
+            SparkExpectationsValidateRules.validate_query_dq_expectation(
+                mock_df, rule, mock_spark, raise_exception=True
+            )
+        assert "does not appear to be a valid SQL SELECT query" in str(exc_info.value)
+
+    @pytest.mark.parametrize("expectation", MULTILINE_COMPOSITE_SUBQUERY_MISSING_SELECT_FROM)
+    def test_composite_subquery_missing_select_or_from_returns_invalid(self, mock_df, mock_spark, expectation):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_bad_subquery"}
+        result = SparkExpectationsValidateRules.validate_query_dq_expectation(mock_df, rule, mock_spark)
+        assert result.is_valid is False
+        assert "not a valid SELECT ... FROM" in result.error_message
+
+    @pytest.mark.parametrize("expectation", MULTILINE_COMPOSITE_SUBQUERY_MISSING_SELECT_FROM)
+    def test_composite_subquery_missing_select_or_from_raises(self, mock_df, mock_spark, expectation):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_bad_subquery"}
+        with pytest.raises(SparkExpectationsInvalidQueryDQExpectationException) as exc_info:
+            SparkExpectationsValidateRules.validate_query_dq_expectation(
+                mock_df, rule, mock_spark, raise_exception=True
+            )
+        assert "not a valid SELECT ... FROM" in str(exc_info.value)
+
+    @pytest.mark.parametrize("expectation", MULTILINE_MALFORMED)
+    def test_malformed_query_returns_invalid(self, mock_df, mock_spark, expectation):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_malformed"}
+        result = SparkExpectationsValidateRules.validate_query_dq_expectation(mock_df, rule, mock_spark)
+        assert result.is_valid is False
+        assert "Invalid SQL syntax" in result.error_message
+
+    @pytest.mark.parametrize("expectation", MULTILINE_MALFORMED)
+    def test_malformed_query_raises(self, mock_df, mock_spark, expectation):
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_malformed"}
+        with pytest.raises(SparkExpectationsInvalidQueryDQExpectationException) as exc_info:
+            SparkExpectationsValidateRules.validate_query_dq_expectation(
+                mock_df, rule, mock_spark, raise_exception=True
+            )
+        assert "Invalid SQL syntax" in str(exc_info.value)
+
+    def test_multiline_query_whitespace_and_literals_reach_parser_unchanged(self, mock_df, mock_spark, monkeypatch):
+        """Line breaks, tabs and string literals are not rewritten, and the SQL parser still runs."""
+        parsed = []
+        original_parse_one = sqlglot.parse_one
+
+        def recording_parse_one(sql, *args, **kwargs):
+            parsed.append(sql)
+            return original_parse_one(sql, *args, **kwargs)
+
+        monkeypatch.setattr(sqlglot, "parse_one", recording_parse_one)
+        expectation = "(select count(*)\r\n\tfrom synthetic_values\nwhere col2 <> 'a\r\n\tb') > 2"
+        rule = {"rule_type": "query_dq", "expectation": expectation, "rule": "multiline_literal"}
+
+        result = SparkExpectationsValidateRules.validate_query_dq_expectation(
+            mock_df, rule, mock_spark, raise_exception=True
+        )
+
+        assert result.is_valid is True
+        assert rule["expectation"] == expectation
+        assert parsed == [expectation.replace("synthetic_values", "dummy_table")]
+
+    def test_validate_expectations_accepts_multiline_query_with_raise_exception(self, mock_df, mock_spark):
+        rules = [
+            {
+                "rule_type": "query_dq",
+                "expectation": "(select count(*)\r\n\tfrom synthetic_values) > 2",
+                "rule": "multiline_query",
+                "action_if_failed": "ignore",
+            }
+        ]
+        invalid_results = SparkExpectationsValidateRules.validate_expectations(
+            mock_df, rules, mock_spark, raise_exception=True
+        )
+        assert invalid_results == {}
+
+    def test_validate_expectations_reports_invalid_multiline_query(self, mock_df, mock_spark):
+        rule = {
+            "rule_type": "query_dq",
+            "expectation": "select count(*)\nwhere col1 > 0",
+            "rule": "multiline_missing_from",
+            "action_if_failed": "ignore",
+        }
+        invalid_results = SparkExpectationsValidateRules.validate_expectations(mock_df, [rule], mock_spark)
+        assert [r.rule for r in invalid_results["query_dq"]] == [rule]
+        with pytest.raises(SparkExpectationsInvalidQueryDQExpectationException):
+            SparkExpectationsValidateRules.validate_expectations(mock_df, [rule], mock_spark, raise_exception=True)

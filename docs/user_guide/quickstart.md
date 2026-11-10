@@ -186,7 +186,13 @@ get_dataset()
     make local-se-server-start ARGS="--build"
     ```
 
-    Then open [http://localhost:8888](http://localhost:8888) and run any of the [example notebooks](https://github.com/Nike-Inc/spark-expectations/tree/main/examples/notebooks).
+    Jupyter Lab requires a token that it generates at startup. Print the login URL with:
+
+    ```bash
+    docker compose -f containers/compose.yaml logs spark-notebooks | grep "http://127.0.0.1:8888"
+    ```
+
+    Open the `http://127.0.0.1:8888/lab?token=...` URL it prints, then run any of the [example notebooks](https://github.com/Nike-Inc/spark-expectations/tree/main/examples/notebooks). See [Jupyter Notebook Examples](../examples_notebooks.md#running-locally-with-docker) for details. The services listen on `127.0.0.1` only, so they are not reachable from other machines.
 
 ---
 
