@@ -1,4 +1,6 @@
 
+{#- Autoescape is enabled inside this template so rendered values are HTML-escaped even when the
+    calling Environment does not enable autoescaping. Template markup itself is trusted. -#}
 <style>
     table {
         border-collapse: collapse;
@@ -23,7 +25,7 @@
     }
 </style>
 
-{% macro render_table(headers, rows) %}
+{% macro render_table(headers, rows) %}{% autoescape true %}
 <table border=1>
     <thead>
         <tr>
@@ -46,7 +48,9 @@
         {% endfor %}
     </tbody>
 </table>
-{% endmacro %}
+{% endautoescape %}{% endmacro %}
 
+{% autoescape true %}
 <h2>{{ title }}</h2>
 {{ render_table(headers, rows) }}
+{% endautoescape %}

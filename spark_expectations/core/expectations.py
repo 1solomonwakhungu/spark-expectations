@@ -1,7 +1,12 @@
 import functools
 import importlib
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, Union, List, TypeAlias, overload, Callable, Tuple
+from typing import Dict, Optional, Any, Union, List, overload, Callable, Tuple
+
+try:
+    from typing import TypeAlias
+except ImportError:  # Python 3.9
+    from typing_extensions import TypeAlias
 
 from pyspark.version import __version__ as spark_version
 from pyspark import StorageLevel
@@ -1246,7 +1251,7 @@ class WrappedDataFrameStreamWriter:
     @overload  # type: ignore   
     def partitionBy(self, __cols: list[str]) -> "WrappedDataFrameStreamWriter": ... # noqa: N802
     
-    def partitionBy(self, *columns: str | List[str]) -> "WrappedDataFrameStreamWriter":  # noqa: N802
+    def partitionBy(self, *columns: Union[str, List[str]]) -> "WrappedDataFrameStreamWriter":  # noqa: N802
         """Set the columns by which the data should be partitioned."""
         # Handle case where a single list is passed: partitionBy(["col1", "col2"])
         if len(columns) == 1 and isinstance(columns[0], list):
