@@ -353,6 +353,9 @@ class SparkExpectationsKafkaRestWritePluginImpl(SparkExpectationsSinkWriter):
         Only the HTTP status and integer ``error_code`` values are reported. The response body
         and proxy-supplied ``message`` fields are not echoed.
         """
+        # Flat guard clauses keep each malformed acknowledgement path explicit.
+        # Exact JSON integers exclude bool, floats and custom integer subclasses.
+        # pylint: disable=too-many-return-statements,unidiomatic-typecheck
         if response.status_code >= 400:
             return f"REST proxy HTTP {response.status_code} for topic '{topic}'"
         if not 200 <= response.status_code < 300:
