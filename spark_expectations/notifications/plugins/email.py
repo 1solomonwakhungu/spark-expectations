@@ -1,6 +1,8 @@
+import html
 import json
 from typing import Dict, Union, Optional
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from jinja2 import Environment, PackageLoader, BaseLoader
@@ -10,7 +12,11 @@ from spark_expectations.notifications.plugins.base_notification import (
     spark_expectations_notification_impl,
 )
 from spark_expectations.core.exceptions import SparkExpectationsEmailException
-from spark_expectations.core.context import SparkExpectationsContext
+from spark_expectations.core.context import (
+    SparkExpectationsContext,
+    SMTP_TLS_MODE_SSL,
+    SMTP_TLS_MODE_STARTTLS,
+)
 from spark_expectations.secrets import SparkExpectationsSecretsBackend
 from spark_expectations.config.user_config import Constants as user_config
 
@@ -71,13 +77,62 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
                 try:
                     password = self._retrieve_password(secret_handler, secret_type, smtp_secret_dict)
                 except KeyError:
-                    raise SparkExpectationsEmailException("SMTP password key is missing in the secret.")
-                except Exception as e:
-                    raise SparkExpectationsEmailException("   Failed to retrieve SMTP password.") from e
+                    raise SparkExpectationsEmailException("SMTP password key is missing in the secret.") from None
+                except Exception:
+                    raise SparkExpectationsEmailException("Failed to retrieve SMTP password.") from None
 
         if password is None:
             raise SparkExpectationsEmailException("SMTP password is not set.")
         server.login(smtp_user, password)
+
+    @staticmethod
+    def _create_ssl_context(ca_file: Optional[str]) -> ssl.SSLContext:
+        """
+        Builds the client TLS context used for SMTP. The server certificate must chain to the system
+        trust store (or to ``ca_file`` when given) and must match the configured SMTP host name.
+        Args:
+            ca_file: optional path to a PEM CA bundle that replaces the system trust store
+        Returns:
+            ssl.SSLContext: verifying client context
+        """
+        if ca_file:
+            ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=ca_file)
+        else:
+            ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+        return ssl_context
+
+    def _connect_smtp(self, _context: SparkExpectationsContext) -> smtplib.SMTP:
+        """
+        Opens an SMTP connection protected by a verified TLS session. Nothing is authenticated or sent
+        until the TLS handshake, including certificate and host name checks, has succeeded.
+        Args:
+            _context: SparkExpectationsContext object
+        Returns:
+            smtplib.SMTP: connected client whose transport is TLS
+        """
+        host = _context.get_mail_smtp_server
+        port = _context.get_mail_smtp_port
+        timeout = _context.get_mail_smtp_timeout
+        tls_mode = _context.get_mail_smtp_tls_mode
+        if tls_mode not in (SMTP_TLS_MODE_STARTTLS, SMTP_TLS_MODE_SSL):
+            raise SparkExpectationsEmailException(f"Unsupported SMTP TLS mode {tls_mode!r}")
+
+        ssl_context = self._create_ssl_context(_context.get_mail_smtp_ca_file)
+        if tls_mode == SMTP_TLS_MODE_SSL:
+            return smtplib.SMTP_SSL(host, port, timeout=timeout, context=ssl_context)
+
+        server = smtplib.SMTP(host, port, timeout=timeout)
+        try:
+            # smtplib raises SMTPNotSupportedError when the server does not offer STARTTLS,
+            # so there is no silent fallback to plaintext.
+            server.starttls(context=ssl_context)
+        except BaseException:
+            server.close()
+            raise
+        return server
 
     def _process_message(
         self, _context: SparkExpectationsContext, _config_args: Dict[Union[str], Union[str, bool]]
@@ -104,11 +159,13 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
                     custom_email_data = json.loads(mail_content)
                     if not _context.get_custom_default_template:
                         template_dir = "config/templates"
-                        env_loader = Environment(loader=PackageLoader("spark_expectations", template_dir))
+                        env_loader = Environment(
+                            loader=PackageLoader("spark_expectations", template_dir), autoescape=True
+                        )
                         template = env_loader.get_template("custom_email_alert_template.jinja")
                     else:
                         template_string = _context.get_custom_default_template
-                        template = Environment(loader=BaseLoader).from_string(template_string)
+                        template = Environment(loader=BaseLoader(), autoescape=True).from_string(template_string)
 
                     mail_content = template.render(custom_email_data)
                     content_type = "html"
@@ -127,11 +184,11 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
             if _context.get_enable_templated_basic_email_body is True:
                 if not _context.get_basic_default_template:
                     template_dir = "config/templates"
-                    env_loader = Environment(loader=PackageLoader("spark_expectations", template_dir))
+                    env_loader = Environment(loader=PackageLoader("spark_expectations", template_dir), autoescape=True)
                     template = env_loader.get_template("basic_email_alert_template.jinja")
                 else:
                     template_string = _context.get_basic_default_template
-                    template = Environment(loader=BaseLoader).from_string(template_string)
+                    template = Environment(loader=BaseLoader(), autoescape=True).from_string(template_string)
 
                 lines = mail_content.strip().split("\n")
                 title = lines[0].strip() if lines else ""
@@ -145,7 +202,8 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
 
                 message_data = {"title": title, "rows": data}
                 html_data = template.render(render_table=template.module.render_table, **message_data)
-                mail_content = f"<h2>{_context.get_mail_subject}</h2>" + html_data
+                # Template values are autoescaped; the subject is inserted outside the template, so escape it here
+                mail_content = f"<h2>{html.escape(str(_context.get_mail_subject))}</h2>" + html_data
                 content_type = "html"
 
         return mail_content, content_type
@@ -176,22 +234,32 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
 
                 msg.attach(MIMEText(mail_content, content_type))
 
-                # mailhost.com
-                server = smtplib.SMTP(_context.get_mail_smtp_server, _context.get_mail_smtp_port)
-                server.starttls()
-                if _context.get_enable_smtp_server_auth:
-                    self._get_smtp_password(_context, server)
-                text = msg.as_string()
-                server.sendmail(
-                    _context.get_mail_from,
-                    [email.strip() for email in _context.get_to_mail.split(",")],
-                    text,
-                )
-                server.quit()
+                server = self._connect_smtp(_context)
+                try:
+                    if _context.get_enable_smtp_server_auth:
+                        self._get_smtp_password(_context, server)
+                    text = msg.as_string()
+                    server.sendmail(
+                        _context.get_mail_from,
+                        [email.strip() for email in _context.get_to_mail.split(",")],
+                        text,
+                    )
+                    server.quit()
+                except BaseException:
+                    server.close()
+                    raise
 
                 _log.info("email sent successfully")
 
-        except Exception as e:
+        except Exception as error:
+            # SMTP peers and secret providers can include credentials in their errors.
+            # Only fixed categories are safe for logs and default traceback formatting.
+            if isinstance(error, ssl.SSLCertVerificationError):
+                reason = "certificate verify failed"
+            elif isinstance(error, smtplib.SMTPNotSupportedError):
+                reason = "SMTP STARTTLS or authentication capability unavailable"
+            else:
+                reason = "SMTP operation failed; downstream error details withheld"
             raise SparkExpectationsEmailException(
-                f"error occurred while sending email notification from spark expectations project {e}"
-            )
+                f"error occurred while sending email notification from spark expectations project: {reason}"
+            ) from None

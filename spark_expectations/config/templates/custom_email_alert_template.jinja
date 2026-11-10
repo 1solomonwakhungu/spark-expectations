@@ -1,3 +1,5 @@
+{#- Autoescape is enabled inside this template so rendered values are HTML-escaped even when the
+    calling Environment does not enable autoescaping. Template markup itself is trusted. -#}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -25,6 +27,7 @@
     </style>
 </head>
 <body>
+{% autoescape true %}
 
 <dl>
     <dt>Product</dt>
@@ -66,6 +69,7 @@
     <dt>Rule Execution Timestamp</dt>
     <dd>{{ meta_dq_run_datetime }}</dd>
 </dl>
+{% endautoescape %}
 
 </body>
 </html>

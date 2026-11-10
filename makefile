@@ -63,7 +63,7 @@ fmt:
 
 generate-mailserver-certs:
 	@echo "Generating mail server certificates..."
-	@cd containers/certs && openssl req -x509 -newkey rsa:4096 -keyout mailpit.key -out mailpit.crt -days 365 -nodes -subj "/CN=localhost"
+	@sh containers/mailserver/generate-certs.sh
 
 get-version:
 	@echo "Print Version Build tool will use for building and publishing"

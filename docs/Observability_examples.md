@@ -62,5 +62,7 @@ Users have two options for generating the report table:
 2. *Default Jinja Template:*
    - If no custom template is provided by the user, the system will automatically fall back to the default jinja template ([spark_expectations/config/templates/advanced_email_alert_template.jinja](../spark_expectations/config/templates/advanced_email_alert_template.jinja)) for rendering the report table.
 
+Both options render with HTML autoescaping enabled: report values and the email subject are escaped, while markup written in the template itself is kept. A custom template is treated as trusted code, so accept template text only from people who may already change the job configuration. See [HTML Escaping and Template Trust](user_guide/notifications/email_notification_types.md#html-escaping-and-template-trust).
+
 ### *Sample for the alert received in the mail*
 ![Spark Expectation alert](https://github.com/Nike-Inc/spark-expectations/blob/main/docs/se_diagrams/alert_sample.png?raw=true)

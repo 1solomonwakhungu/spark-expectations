@@ -1,10 +1,35 @@
 import traceback
+from typing import Optional
 from dataclasses import dataclass
-from jinja2 import Environment, PackageLoader, BaseLoader
+from jinja2 import Environment, PackageLoader, BaseLoader, Template
+from markupsafe import escape
 from pyspark.sql import Row
 from spark_expectations import _log
 from spark_expectations.notifications import SparkExpectationsEmailPluginImpl
 from spark_expectations.core.context import SparkExpectationsContext
+
+
+def _get_detailed_report_template(template_string: Optional[str]) -> Template:
+    """
+    Build the Jinja2 template used for the detailed email report.
+
+    HTML autoescaping is always enabled, both for the packaged default template and for a
+    template string supplied through user configuration. Every value passed into the template
+    (rule names, descriptions, column names, report cells, titles) is HTML-escaped on output.
+    Literal markup written in the template itself is trusted and rendered unchanged, so a custom
+    template must come from a trusted source: template syntax is code, not data.
+
+    Args:
+        template_string: custom template text from user configuration, or a falsy value to use
+            the packaged ``advanced_email_alert_template.jinja``.
+
+    Returns:
+        Template: the compiled template.
+    """
+    if not template_string:
+        env = Environment(loader=PackageLoader("spark_expectations", "config/templates"), autoescape=True)
+        return env.get_template("advanced_email_alert_template.jinja")
+    return Environment(loader=BaseLoader(), autoescape=True).from_string(template_string)
 
 
 @dataclass
@@ -94,13 +119,7 @@ class SparkExpectationsAlert:
             context = self._context
             mail_subject = self._context.get_mail_subject
             mail_receivers_list = self._context.get_to_mail
-            if not self._context.get_detailed_default_template:
-                template_dir = "config/templates"
-                env_loader = Environment(loader=PackageLoader("spark_expectations", template_dir))
-                template = env_loader.get_template("advanced_email_alert_template.jinja")
-            else:
-                template_string = self._context.get_detailed_default_template
-                template = Environment(loader=BaseLoader).from_string(template_string)
+            template = _get_detailed_report_template(self._context.get_detailed_default_template)
 
             header_columns, header_data, _ = self.get_report_data("header")
             (
@@ -134,7 +153,7 @@ class SparkExpectationsAlert:
             html_data = "<br>".join(
                 [template.render(render_table=template.module.render_table, **data_dict) for data_dict in data_dicts]
             )
-            html_data = f"<h2>{mail_subject}</h2>" + html_data
+            html_data = f"<h2>{escape(mail_subject)}</h2>" + html_data
 
             config_args = {
                 "receiver_mail": context.get_to_mail,

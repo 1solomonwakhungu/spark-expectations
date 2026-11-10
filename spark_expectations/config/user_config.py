@@ -25,6 +25,13 @@ class Constants:
     se_notifications_enable_custom_email_body = "spark.expectations.notifications.email.custom.body.enable"
     se_notifications_email_smtp_host = "spark.expectations.notifications.email.smtp.host"
     se_notifications_email_smtp_port = "spark.expectations.notifications.email.smtp.port"
+    # SMTP transport security: "starttls" (default) upgrades a plain connection with STARTTLS,
+    # "ssl" connects with implicit TLS (SMTPS). Certificates and hostnames are always verified.
+    se_notifications_email_smtp_tls_mode = "spark.expectations.notifications.email.smtp.tls.mode"
+    # Optional path to a PEM CA bundle used instead of the system trust store to verify the SMTP server
+    se_notifications_email_smtp_ca_file = "spark.expectations.notifications.email.smtp.ca.file"
+    # Socket timeout in seconds for SMTP connect and each SMTP operation (0 < timeout <= 300)
+    se_notifications_email_smtp_timeout = "spark.expectations.notifications.email.smtp.timeout.sec"
     se_notifications_email_from = "spark.expectations.notifications.email.from"
     se_notifications_email_to_other_mail_id = "spark.expectations.notifications.email.to.other.mail.com"
     se_notifications_email_subject = "spark.expectations.notifications.email.subject"
