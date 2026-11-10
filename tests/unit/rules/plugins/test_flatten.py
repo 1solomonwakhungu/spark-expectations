@@ -575,7 +575,7 @@ def test_flatten_dq_env_inherited_values_warn_once_per_rule_and_field():
     for rule in ("r1", "r2"):
         rule_messages = [m for m in messages if f"for rule '{rule}'" in m]
         assert len(rule_messages) == 2
-        assert all("table_name='cat.sch.orders', set in dq_env.Prod" in m for m in rule_messages)
+        assert all("table_name='cat.sch.orders', set in dq_env['Prod']" in m for m in rule_messages)
         assert any("'is_active'" in m and "' true '" in m for m in rule_messages)
         assert any("'error_drop_threshold'" in m and "1.9 is truncated to 1" in m for m in rule_messages)
 
@@ -706,5 +706,49 @@ def test_yaml_and_json_files_produce_identical_rows_and_warnings(tmp_path):
     yaml_messages = _warning_messages(yaml_log)
     assert yaml_messages == _warning_messages(json_log)
     assert len(yaml_messages) == 3
-    assert sum("for rule 'r1'" in m and "set in dq_env.PROD" in m for m in yaml_messages) == 2
+    assert sum("for rule 'r1'" in m and "set in dq_env['PROD']" in m for m in yaml_messages) == 2
     assert sum("for rule 'r2'" in m and "set in rule definition" in m for m in yaml_messages) == 1
+
+
+@pytest.mark.parametrize("value", [Fraction(1, 10**5000), Decimal("1" + "0" * 5000 + ".5")],
+                         ids=["tiny_fraction", "large_decimal"])
+def test_warning_representation_cannot_reject_numeric_input(value):
+    data = {
+        "product_id": "p1",
+        "rules": [{"rule": "r1", "rule_type": "row_dq", "expectation": "a > 0", "error_drop_threshold": value}],
+    }
+    with patch("spark_expectations.rules.plugins._flatten._log") as mock_log:
+        rows = flatten_rules_list(data)
+    assert rows[0]["error_drop_threshold"] == int(value)
+    messages = _warning_messages(mock_log)
+    assert len(messages) == 1
+    assert "<unrepresentable value>" in messages[0]
+    assert len(messages[0]) < 500
+
+
+@pytest.mark.parametrize("suffix", ["\nFORGED", "\r\tCONTROL"])
+@pytest.mark.parametrize("length", [2, 10000])
+def test_warning_environment_provenance_is_bounded_and_escaped(tmp_path, suffix, length):
+    import yaml
+
+    env = "E" * length + suffix
+    data = {
+        "product_id": "p1",
+        "dq_env": {env: {"table_name": "t1", "is_active": "tru"}},
+        "rules": [{"rule": "r1", "rule_type": "row_dq", "expectation": "a > 0"}],
+    }
+    json_path = tmp_path / "rules.json"
+    json_path.write_text(json.dumps(data), encoding="utf-8")
+    yaml_path = tmp_path / "rules.yaml"
+    yaml_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    messages = []
+    for document in (_read_json(str(json_path)), _read_yaml(str(yaml_path))):
+        with patch("spark_expectations.rules.plugins._flatten._log") as mock_log:
+            rows = flatten_rules_list(document, env=env.lower())
+        assert rows[0]["is_active"] is False
+        warning, = _warning_messages(mock_log)
+        assert "set in dq_env[" in warning
+        assert len(warning) < 500
+        assert not any(character in warning for character in "\n\r\t")
+        messages.append(warning)
+    assert messages[0] == messages[1]

@@ -198,7 +198,7 @@ def flatten_rules_list(
         env_defaults = {k: v for k, v in env_config.items() if k != "table_name"}
         user_defaults = {**(data.get("defaults") or {}), **env_defaults}
         env_key = {k.lower(): k for k in dq_env}[env_lower]
-        default_sources = [(f"dq_env.{env_key}", env_defaults), ("defaults", data.get("defaults") or {})]
+        default_sources = [(f"dq_env[{_short_repr(env_key)}]", env_defaults), ("defaults", data.get("defaults") or {})]
     else:
         table_name = data.get("table_name", "")
         user_defaults = data.get("defaults") or {}
@@ -252,8 +252,11 @@ def flatten_rules_list(
 
 
 def _short_repr(value: Any) -> str:
-    """Return ``repr(value)`` truncated to a bounded length for log messages."""
-    text = repr(value)
+    """Return a bounded representation without letting diagnostics reject a value."""
+    try:
+        text = repr(value)
+    except Exception:  # A diagnostic must not change whether a rule can be normalized.
+        return "<unrepresentable value>"
     if len(text) > _MAX_DIAGNOSTIC_REPR_LENGTH:
         return text[: _MAX_DIAGNOSTIC_REPR_LENGTH - 3] + "..."
     return text
@@ -295,7 +298,7 @@ def _describe_lossy_coercion(col: str, value: Any) -> Optional[str]:
             return None
         if value == truncated:
             return None
-        return f"fractional value {_short_repr(value)} is truncated to {truncated}; use a whole number"
+        return f"fractional value {_short_repr(value)} is truncated to {_short_repr(truncated)}; use a whole number"
 
     return None
 
