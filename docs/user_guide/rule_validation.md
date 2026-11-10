@@ -74,3 +74,5 @@ col1 IS NOT NULL        -- No aggregate function; use row_dq instead
 | `query_dq` | `ignore`, `fail` |
 
 Using `drop` with `agg_dq` or `query_dq` will trigger a validation warning. The rule is still executed unless you fix or deactivate it in your rules table.
+
+Values are case-sensitive. A missing or empty `action_if_failed` passes validation; when rules are read for execution, it defaults to `ignore`.
