@@ -24,6 +24,15 @@ class SparkExpectationsReader:
     def __post_init__(self) -> None:
         self.spark = self._context.spark
 
+    def _set_smtp_transport_param(self, _notification_dict: Dict[str, Union[int, str, bool, Dict[str, str]]]) -> None:
+        """
+        Sets SMTP transport security options (TLS mode, CA bundle and timeout) on the context.
+        The context setters validate the values and fall back to verified STARTTLS with a 30 second timeout.
+        """
+        self._context.set_mail_smtp_tls_mode(_notification_dict.get(user_config.se_notifications_email_smtp_tls_mode))
+        self._context.set_mail_smtp_ca_file(_notification_dict.get(user_config.se_notifications_email_smtp_ca_file))
+        self._context.set_mail_smtp_timeout(_notification_dict.get(user_config.se_notifications_email_smtp_timeout))
+
     def set_notification_param(
         self,
         notification: Optional[Dict[str, Union[int, str, bool, Dict[str, str]]]] = None,
@@ -44,6 +53,7 @@ class SparkExpectationsReader:
 
                     smtp_port = _notification_dict.get(user_config.se_notifications_email_smtp_port, 25)
                     self._context.set_mail_smtp_port(int(smtp_port) if isinstance(smtp_port, (str, int)) else 25)
+                    self._set_smtp_transport_param(_notification_dict)
                     self._context.set_mail_subject(str(_notification_dict[user_config.se_notifications_email_subject]))
                     self._context.set_mail_smtp_password(
                         str(_notification_dict[user_config.se_notifications_smtp_password])
@@ -81,6 +91,7 @@ class SparkExpectationsReader:
                     )
                     smtp_port = _notification_dict.get(user_config.se_notifications_email_smtp_port, 25)
                     self._context.set_mail_smtp_port(int(smtp_port) if isinstance(smtp_port, (str, int)) else 25)
+                    self._set_smtp_transport_param(_notification_dict)
 
                     self._context.set_mail_from(str(_notification_dict[user_config.se_notifications_email_from]))
                 else:

@@ -947,3 +947,55 @@ def test_set_notification_param_zoom_complete():
     mock_context.set_enable_zoom.assert_called_with(True)
     mock_context.set_zoom_webhook_url.assert_called_with("https://zoom.webhook.url")
     mock_context.set_zoom_token.assert_called_with("zoom_token_123")
+
+
+def test_set_notification_param_smtp_transport_security():
+    """SMTP TLS mode, CA bundle and timeout are passed to the context for email notifications"""
+    from spark_expectations.config.user_config import Constants as user_config
+
+    mock_context = Mock(spec=SparkExpectationsContext)
+    mock_context.spark = spark
+    reader = SparkExpectationsReader(mock_context)
+
+    reader.set_notification_param(
+        {
+            user_config.se_notifications_enable_email: True,
+            user_config.se_notifications_email_smtp_host: "smtp.example.invalid",
+            user_config.se_notifications_email_smtp_port: 465,
+            user_config.se_notifications_email_from: "sender@example.invalid",
+            user_config.se_notifications_email_to_other_mail_id: "recipient@example.invalid",
+            user_config.se_notifications_email_subject: "Test",
+            user_config.se_notifications_email_smtp_tls_mode: "ssl",
+            user_config.se_notifications_email_smtp_ca_file: "/synthetic/ca.pem",
+            user_config.se_notifications_email_smtp_timeout: 12,
+        }
+    )
+
+    mock_context.set_mail_smtp_tls_mode.assert_called_once_with("ssl")
+    mock_context.set_mail_smtp_ca_file.assert_called_once_with("/synthetic/ca.pem")
+    mock_context.set_mail_smtp_timeout.assert_called_once_with(12)
+
+
+def test_set_notification_param_smtp_transport_defaults_and_validation():
+    """Unset SMTP transport options select the context defaults; invalid values fail configuration"""
+    from spark_expectations.config.user_config import Constants as user_config
+
+    context = SparkExpectationsContext(product_id="product1", spark=spark)
+    reader = SparkExpectationsReader(context)
+    notification = {
+        user_config.se_notifications_enable_email: True,
+        user_config.se_notifications_email_smtp_host: "smtp.example.invalid",
+        user_config.se_notifications_email_from: "sender@example.invalid",
+        user_config.se_notifications_email_to_other_mail_id: "recipient@example.invalid",
+        user_config.se_notifications_email_subject: "Test",
+    }
+
+    reader.set_notification_param(notification)
+    assert context.get_mail_smtp_tls_mode == "starttls"
+    assert context.get_mail_smtp_ca_file is None
+    assert context.get_mail_smtp_timeout == 30.0
+
+    with pytest.raises(SparkExpectationsMiscException, match="SMTP timeout"):
+        reader.set_notification_param({**notification, user_config.se_notifications_email_smtp_timeout: 0})
+    with pytest.raises(SparkExpectationsMiscException, match="Unsupported SMTP TLS mode"):
+        reader.set_notification_param({**notification, user_config.se_notifications_email_smtp_tls_mode: "none"})

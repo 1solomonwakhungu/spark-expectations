@@ -7,6 +7,9 @@ spark.expectations.notifications.email.default.basic.template: ""
 spark.expectations.notifications.email.custom.template: ""
 spark.expectations.notifications.email.smtp.host: ""
 spark.expectations.notifications.email.smtp.port: 25
+spark.expectations.notifications.email.smtp.tls.mode: "starttls"
+spark.expectations.notifications.email.smtp.ca.file: ""
+spark.expectations.notifications.email.smtp.timeout.sec: 30
 spark.expectations.notifications.email.smtp.password: ""
 spark.expectations.notifications.email.from: ""
 spark.expectations.notifications.email.to.other.mail.com: ""

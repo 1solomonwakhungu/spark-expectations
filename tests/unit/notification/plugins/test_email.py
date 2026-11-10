@@ -1,3 +1,4 @@
+import ssl
 from unittest.mock import patch, MagicMock
 import pytest
 from spark_expectations.core.exceptions import SparkExpectationsEmailException
@@ -14,6 +15,9 @@ def test_send_notification_success(_mock_context):
     _mock_context.get_mail_subject = "Test Email"
     _mock_context.get_mail_smtp_server = "mailhost.example.com"
     _mock_context.get_mail_smtp_port = 587
+    _mock_context.get_mail_smtp_tls_mode = "starttls"
+    _mock_context.get_mail_smtp_ca_file = None
+    _mock_context.get_mail_smtp_timeout = 30.0
 
     mock_config_args = {"message": "Test Email Body"}
 
@@ -25,8 +29,13 @@ def test_send_notification_success(_mock_context):
         email_handler.send_notification(_context=_mock_context, _config_args=mock_config_args)
 
         # assert
-        mock_smtp.assert_called_with(_mock_context.get_mail_smtp_server, _mock_context.get_mail_smtp_port)
-        mock_smtp().starttls.assert_called()
+        mock_smtp.assert_called_with(
+            _mock_context.get_mail_smtp_server, _mock_context.get_mail_smtp_port, timeout=30.0
+        )
+        mock_smtp().starttls.assert_called_once()
+        tls_context = mock_smtp().starttls.call_args.kwargs["context"]
+        assert tls_context.verify_mode == ssl.CERT_REQUIRED
+        assert tls_context.check_hostname is True
         mock_smtp().sendmail.assert_called_with(
             _mock_context.get_mail_from,
             [email.strip() for email in _mock_context.get_to_mail.split(",")],
@@ -87,6 +96,9 @@ def test_send_notification_with_smtp_auth(_mock_context):
     _mock_context.get_mail_smtp_server = "mailhost.example.com"
     _mock_context.get_mail_smtp_port = 587
     _mock_context.get_enable_smtp_server_auth = True
+    _mock_context.get_mail_smtp_tls_mode = "starttls"
+    _mock_context.get_mail_smtp_ca_file = None
+    _mock_context.get_mail_smtp_timeout = 30.0
 
     mock_config_args = {"message": "Test Email Body"}
 
@@ -101,8 +113,13 @@ def test_send_notification_with_smtp_auth(_mock_context):
         email_handler.send_notification(_context=_mock_context, _config_args=mock_config_args)
 
         # assert
-        mock_smtp.assert_called_with(_mock_context.get_mail_smtp_server, _mock_context.get_mail_smtp_port)
-        mock_smtp().starttls.assert_called()
+        mock_smtp.assert_called_with(
+            _mock_context.get_mail_smtp_server, _mock_context.get_mail_smtp_port, timeout=30.0
+        )
+        mock_smtp().starttls.assert_called_once()
+        tls_context = mock_smtp().starttls.call_args.kwargs["context"]
+        assert tls_context.verify_mode == ssl.CERT_REQUIRED
+        assert tls_context.check_hostname is True
         mock_get_smtp_password.assert_called_once_with(_mock_context, mock_smtp.return_value)
         mock_smtp().sendmail.assert_called_with(
             _mock_context.get_mail_from,

@@ -1,6 +1,7 @@
 import json
 from typing import Dict, Union, Optional
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from jinja2 import Environment, PackageLoader, BaseLoader
@@ -10,7 +11,11 @@ from spark_expectations.notifications.plugins.base_notification import (
     spark_expectations_notification_impl,
 )
 from spark_expectations.core.exceptions import SparkExpectationsEmailException
-from spark_expectations.core.context import SparkExpectationsContext
+from spark_expectations.core.context import (
+    SparkExpectationsContext,
+    SMTP_TLS_MODE_SSL,
+    SMTP_TLS_MODE_STARTTLS,
+)
 from spark_expectations.secrets import SparkExpectationsSecretsBackend
 from spark_expectations.config.user_config import Constants as user_config
 
@@ -78,6 +83,55 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
         if password is None:
             raise SparkExpectationsEmailException("SMTP password is not set.")
         server.login(smtp_user, password)
+
+    @staticmethod
+    def _create_ssl_context(ca_file: Optional[str]) -> ssl.SSLContext:
+        """
+        Builds the client TLS context used for SMTP. The server certificate must chain to the system
+        trust store (or to ``ca_file`` when given) and must match the configured SMTP host name.
+        Args:
+            ca_file: optional path to a PEM CA bundle that replaces the system trust store
+        Returns:
+            ssl.SSLContext: verifying client context
+        """
+        if ca_file:
+            ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH, cafile=ca_file)
+        else:
+            ssl_context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        ssl_context.check_hostname = True
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+        return ssl_context
+
+    def _connect_smtp(self, _context: SparkExpectationsContext) -> smtplib.SMTP:
+        """
+        Opens an SMTP connection protected by a verified TLS session. Nothing is authenticated or sent
+        until the TLS handshake, including certificate and host name checks, has succeeded.
+        Args:
+            _context: SparkExpectationsContext object
+        Returns:
+            smtplib.SMTP: connected client whose transport is TLS
+        """
+        host = _context.get_mail_smtp_server
+        port = _context.get_mail_smtp_port
+        timeout = _context.get_mail_smtp_timeout
+        tls_mode = _context.get_mail_smtp_tls_mode
+        if tls_mode not in (SMTP_TLS_MODE_STARTTLS, SMTP_TLS_MODE_SSL):
+            raise SparkExpectationsEmailException(f"Unsupported SMTP TLS mode {tls_mode!r}")
+
+        ssl_context = self._create_ssl_context(_context.get_mail_smtp_ca_file)
+        if tls_mode == SMTP_TLS_MODE_SSL:
+            return smtplib.SMTP_SSL(host, port, timeout=timeout, context=ssl_context)
+
+        server = smtplib.SMTP(host, port, timeout=timeout)
+        try:
+            # smtplib raises SMTPNotSupportedError when the server does not offer STARTTLS,
+            # so there is no silent fallback to plaintext.
+            server.starttls(context=ssl_context)
+        except BaseException:
+            server.close()
+            raise
+        return server
 
     def _process_message(
         self, _context: SparkExpectationsContext, _config_args: Dict[Union[str], Union[str, bool]]
@@ -176,22 +230,24 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
 
                 msg.attach(MIMEText(mail_content, content_type))
 
-                # mailhost.com
-                server = smtplib.SMTP(_context.get_mail_smtp_server, _context.get_mail_smtp_port)
-                server.starttls()
-                if _context.get_enable_smtp_server_auth:
-                    self._get_smtp_password(_context, server)
-                text = msg.as_string()
-                server.sendmail(
-                    _context.get_mail_from,
-                    [email.strip() for email in _context.get_to_mail.split(",")],
-                    text,
-                )
-                server.quit()
+                server = self._connect_smtp(_context)
+                try:
+                    if _context.get_enable_smtp_server_auth:
+                        self._get_smtp_password(_context, server)
+                    text = msg.as_string()
+                    server.sendmail(
+                        _context.get_mail_from,
+                        [email.strip() for email in _context.get_to_mail.split(",")],
+                        text,
+                    )
+                    server.quit()
+                except BaseException:
+                    server.close()
+                    raise
 
                 _log.info("email sent successfully")
 
         except Exception as e:
             raise SparkExpectationsEmailException(
                 f"error occurred while sending email notification from spark expectations project {e}"
-            )
+            ) from e
