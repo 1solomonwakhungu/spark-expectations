@@ -496,8 +496,15 @@ class SparkExpectations:
             if rule.get("rule_type") == "query_dq":
                 # Expanded rules retain executable secondary SQL outside the final expression.
                 secondary = dict(dq_queries.get(secondary_query_key(rule), {}))
-                secondary.update({key: value for key, value in rule.items()
-                                  if key.startswith("expectation_") and key != "expectation_hash"})
+                fields = {
+                    key[len("expectation_") :]: value
+                    for key, value in rule.items()
+                    if key.startswith("expectation_") and key != "expectation_hash"
+                }
+                if fields:
+                    # Execution resolves shared map keys against this occurrence's fields.
+                    secondary = {key: fields.get(key) for key in secondary}
+                    secondary.update(fields)
                 for query in secondary.values():
                     check = SparkExpectationsValidateRules.validate_query_dq_expectation(
                         df, {**rule, "expectation": query}, self.spark
@@ -1061,7 +1068,9 @@ class SparkExpectations:
                     install_rule_counters(self._context, _decorated_expectations)
                     self._context.set_rules_validation_policy_result(
                         _rules_validation_policy,
-                        {"num_invalid_rules": 0, "num_skipped_rules": 0, "input_counted": 0}, [], [],
+                        {"num_invalid_rules": 0, "num_skipped_rules": 0, "input_counted": 0},
+                        [],
+                        [],
                     )
                     _log.info("The function dataframe is getting created")
                     _df: DataFrame = func(*args, **kwargs)
