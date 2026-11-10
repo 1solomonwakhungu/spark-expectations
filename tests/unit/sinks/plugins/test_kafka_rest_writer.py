@@ -21,7 +21,8 @@ def _fake_stats_df(rows):
     stats_df = MagicMock()
     projected = MagicMock()
     stats_df.selectExpr.return_value = projected
-    projected.collect.return_value = [{"value": r} for r in rows]
+    projected.toLocalIterator.side_effect = lambda *a, **k: iter([{"value": r} for r in rows])
+    projected.collect.side_effect = AssertionError("collect() must not be used by the REST writer")
     return stats_df
 
 
@@ -210,8 +211,11 @@ def test_writer_raises_on_request_exception():
         "spark_expectations.sinks.plugins.kafka_rest_writer._build_session",
         return_value=mock_session,
     ):
-        with pytest.raises(SparkExpectationsMiscException, match="network down"):
+        with pytest.raises(SparkExpectationsMiscException, match="topic 'dq-stats': RuntimeError") as excinfo:
             plugin.writer(_write_args=_write_args())
+    # Raw exception text is not echoed or chained (it can carry the proxy URL).
+    assert "network down" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
 
 
 def test_writer_iterates_all_rows():
