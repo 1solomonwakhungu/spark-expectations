@@ -32,7 +32,8 @@ Monitor your driver logs for validation warnings and fix invalid rules in your r
 
 ### Strict validation outside the pipeline
 
-The pipeline always validates in non-blocking mode. To check rules yourself, for example in a CI job, call
+The pipeline collects validation results without raising from the helper, then applies the configured
+[runtime validation policy](rule_validation_policy.md). To check rules yourself, for example in a CI job, call
 `SparkExpectationsValidateRules.validate_expectations(df, rules, spark, raise_exception=True)`.
 It raises on the first invalid rule instead of returning the map of invalid results:
 
