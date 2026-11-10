@@ -1,4 +1,5 @@
 import json
+import math
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import requests
@@ -132,12 +133,12 @@ def _positive_number_option(rest_options: Dict[str, Any], key: str, default: flo
     raw = rest_options.get(key, default)
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         value = -1.0
-    if value < 0 or (value == 0 and not allow_zero) or value != value:  # value != value catches NaN
+    if isinstance(raw, bool) or not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero):
         raise SparkExpectationsMiscException(
             f"invalid kafka REST option '{key}': expected a {'non-negative' if allow_zero else 'positive'} number"
-        )
+        ) from None
     return value
 
 
@@ -146,7 +147,10 @@ def _resolve_max_retry_after(rest_options: Dict[str, Any]) -> float:
 
 
 def _resolve_max_record_bytes(rest_options: Dict[str, Any]) -> int:
-    return int(_positive_number_option(rest_options, "max_record_bytes", DEFAULT_REST_MAX_RECORD_BYTES, False))
+    value = _positive_number_option(rest_options, "max_record_bytes", DEFAULT_REST_MAX_RECORD_BYTES, False)
+    if not value.is_integer():
+        raise SparkExpectationsMiscException("invalid kafka REST option 'max_record_bytes': expected a positive integer") from None
+    return int(value)
 
 
 def _build_session(rest_options: Dict[str, Any]) -> requests.Session:
@@ -284,7 +288,7 @@ class SparkExpectationsKafkaRestWritePluginImpl(SparkExpectationsSinkWriter):
                         record_number,
                         acknowledged,
                         attempted=False,
-                    )
+                    ) from None
                 try:
                     response = session.post(
                         url,
@@ -313,7 +317,7 @@ class SparkExpectationsKafkaRestWritePluginImpl(SparkExpectationsSinkWriter):
 
                 reason = self._record_error_reason(response, topic)
                 if reason is not None:
-                    raise _delivery_failure(reason, record_number, acknowledged)
+                    raise _delivery_failure(reason, record_number, acknowledged) from None
                 acknowledged += 1
                 total_bytes_sent += len(payload_bytes)
         finally:
@@ -331,7 +335,7 @@ class SparkExpectationsKafkaRestWritePluginImpl(SparkExpectationsSinkWriter):
         del base_url
         reason = SparkExpectationsKafkaRestWritePluginImpl._record_error_reason(response, topic)
         if reason is not None:
-            raise SparkExpectationsMiscException(reason)
+            raise SparkExpectationsMiscException(reason) from None
 
     @staticmethod
     def _record_error_reason(response: requests.Response, topic: str) -> Optional[str]:
@@ -342,20 +346,27 @@ class SparkExpectationsKafkaRestWritePluginImpl(SparkExpectationsSinkWriter):
         """
         if response.status_code >= 400:
             return f"REST proxy HTTP {response.status_code} for topic '{topic}'"
-        payload: Any = {}
+        if not 200 <= response.status_code < 300:
+            return f"REST proxy unexpected HTTP {response.status_code} for topic '{topic}'"
+        malformed = f"REST proxy invalid acknowledgement for topic '{topic}'"
         try:
-            if response.content:
-                payload = response.json()
-        except ValueError:
-            payload = {}
+            payload = response.json()
+        except (ValueError, TypeError):
+            return malformed
         if not isinstance(payload, dict):
-            payload = {}
-
-        offsets = payload.get("offsets") or []
-        codes = [o.get("error_code") for o in offsets if isinstance(o, dict) and o.get("error_code") is not None]
-        if payload.get("error_code") is not None:
-            codes.insert(0, payload.get("error_code"))
-        if codes:
-            safe_codes = ", ".join(str(c) if isinstance(c, int) else "non-integer" for c in codes)
-            return f"REST proxy record error for topic '{topic}' (error_code={safe_codes})"
+            return malformed
+        code = payload.get("error_code")
+        if code is not None:
+            safe_code = str(code) if type(code) is int else "non-integer"
+            return f"REST proxy record error for topic '{topic}' (error_code={safe_code})"
+        offsets = payload.get("offsets")
+        if not isinstance(offsets, list) or len(offsets) != 1 or not isinstance(offsets[0], dict):
+            return malformed
+        record = offsets[0]
+        code = record.get("error_code")
+        if code is not None:
+            safe_code = str(code) if type(code) is int else "non-integer"
+            return f"REST proxy record error for topic '{topic}' (error_code={safe_code})"
+        if any(type(record.get(key)) is not int or record[key] < 0 for key in ("partition", "offset")):
+            return malformed
         return None

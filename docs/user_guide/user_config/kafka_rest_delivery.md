@@ -52,9 +52,9 @@ These keys are read from `rest_write_options`:
 | Key | Default | Meaning |
 |---|---|---|
 | `max_record_bytes` | `1048576` (1 MiB) | Largest request body allowed. A larger record fails the write before it is sent. |
-| `max_retry_after_sec` | `30` | Longest the writer waits for a single `Retry-After` header. Larger values are reduced to this. `0` retries immediately. |
+| `max_retry_after_sec` | `30` | Longest the writer waits for a single `Retry-After` header. Larger values are reduced to this. `0` disables Retry-After sleeping; exponential backoff still applies. |
 | `max_retries` | `3` | Retries per record for connection, read and retryable-status failures. `0` disables retries. |
-| `backoff_factor` | `0.5` | Exponential backoff between retries when no `Retry-After` header is present. |
+| `backoff_factor` | `0.5` | Exponential backoff between retries when no positive Retry-After delay is applied. |
 
 The longest a single record can wait in `Retry-After` sleeps is about
 `max_retries × max_retry_after_sec`, plus request timeouts.
@@ -63,3 +63,5 @@ The longest a single record can wait in `Retry-After` sleeps is about
     In this version the REST writer is not yet registered with the built-in sink manager, and no
     `user_config` keys map to `max_record_bytes` or `max_retry_after_sec`. The defaults above apply
     unless the caller puts these keys in `rest_write_options`.
+
+A response confirms the single submitted record only when it has a successful HTTP status and exactly one offsets entry with non-negative integer partition and offset values and no error code. Empty, non-JSON or malformed responses now fail with unknown delivery instead of being treated as acknowledgements.

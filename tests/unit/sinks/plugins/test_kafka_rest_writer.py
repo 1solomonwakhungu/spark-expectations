@@ -418,9 +418,9 @@ def test_writer_raises_on_top_level_error_code_with_http_200():
             plugin.writer(_write_args=_write_args())
 
 
-def test_writer_accepts_empty_response_body():
+def test_writer_rejects_empty_response_body():
     plugin = SparkExpectationsKafkaRestWritePluginImpl()
-    # HTTP 200 with an empty body should not raise (no offsets, no error_code).
+    # A successful HTTP status without a record acknowledgement is not confirmed delivery.
     resp = MagicMock()
     resp.status_code = 200
     resp.text = ""
@@ -431,14 +431,14 @@ def test_writer_accepts_empty_response_body():
         "spark_expectations.sinks.plugins.kafka_rest_writer._build_session",
         return_value=mock_session,
     ):
-        plugin.writer(_write_args=_write_args())
+        with pytest.raises(SparkExpectationsMiscException, match="invalid acknowledgement"):
+            plugin.writer(_write_args=_write_args())
     assert mock_session.post.call_count == 1
 
 
-def test_writer_tolerates_non_json_response_body():
+def test_writer_rejects_non_json_response_body():
     plugin = SparkExpectationsKafkaRestWritePluginImpl()
-    # HTTP 200 but body isn't valid JSON — code path should swallow ValueError
-    # and treat payload as empty.
+    # Non-JSON responses cannot confirm record delivery.
     resp = MagicMock()
     resp.status_code = 200
     resp.text = "<html>oops</html>"
@@ -449,7 +449,8 @@ def test_writer_tolerates_non_json_response_body():
         "spark_expectations.sinks.plugins.kafka_rest_writer._build_session",
         return_value=mock_session,
     ):
-        plugin.writer(_write_args=_write_args())
+        with pytest.raises(SparkExpectationsMiscException, match="invalid acknowledgement"):
+            plugin.writer(_write_args=_write_args())
     assert mock_session.post.call_count == 1
 
 
@@ -523,3 +524,27 @@ def test_writer_strips_trailing_slash_from_base_url():
         plugin.writer(_write_args=args)
     # No double slash in the resolved URL.
     assert mock_session.post.call_args.args[0] == "https://kafka-rest.example.com/topics/dq-stats"
+
+
+@pytest.mark.parametrize("payload", [[], {"offsets": ["bad"]}, {"offsets": 7}, {"offsets": []}, {"offsets": [{}]}])
+def test_malformed_acknowledgement_is_not_success(payload):
+    with pytest.raises(SparkExpectationsMiscException, match="invalid acknowledgement"):
+        SparkExpectationsKafkaRestWritePluginImpl._raise_for_record_errors(_response(200, payload), "test")
+
+
+@pytest.mark.parametrize("key,value", [("max_retry_after_sec", float("inf")), ("max_retry_after_sec", "1e309"), ("max_record_bytes", 10**400), ("max_record_bytes", 1.5), ("max_record_bytes", True)])
+def test_limits_require_finite_valid_numbers(key, value):
+    from spark_expectations.sinks.plugins.kafka_rest_writer import _resolve_max_record_bytes, _resolve_max_retry_after
+    resolve = _resolve_max_record_bytes if key == "max_record_bytes" else _resolve_max_retry_after
+    with pytest.raises(SparkExpectationsMiscException, match=key):
+        resolve({key: value})
+
+
+def test_error_helper_suppresses_ambient_context():
+    import traceback
+    try:
+        raise RuntimeError("AMBIENT_PRIVATE_SENTINEL")
+    except RuntimeError:
+        with pytest.raises(SparkExpectationsMiscException) as caught:
+            SparkExpectationsKafkaRestWritePluginImpl._raise_for_record_errors(_response(500), "test")
+    assert "AMBIENT_PRIVATE_SENTINEL" not in "".join(traceback.format_exception(caught.value))
