@@ -9,10 +9,11 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from spark_expectations import _log
 from spark_expectations.core.exceptions import SparkExpectationsMiscException
 from spark_expectations.sinks.plugins.kafka_rest_writer import (
     DEFAULT_REST_MAX_RECORD_BYTES,
@@ -25,6 +26,14 @@ from spark_expectations.sinks.plugins.kafka_rest_writer import (
 SYNTHETIC_SECRET = "synthetic-secret-7f3a"
 BODY_MARKER = "proxy-body-marker-91c2"
 OK_BODY = json.dumps({"offsets": [{"partition": 0, "offset": 1, "error_code": None}]})
+
+
+@pytest.fixture(autouse=True)
+def capture_package_logs(caplog):
+    # Suite fixtures can disable propagation; capture the actual package logger.
+    with patch.object(_log, "handlers", [*_log.handlers, caplog.handler]):
+        with caplog.at_level("DEBUG", logger=_log.name):
+            yield
 
 
 class _Proxy:
