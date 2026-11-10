@@ -1,8 +1,12 @@
 # Security Model
 
-This page describes what Spark Expectations trusts, where its boundaries are, and what a deployment has to enforce for itself. To report a vulnerability, follow [SECURITY.md](https://github.com/Nike-Inc/spark-expectations/blob/main/SECURITY.md).
+This page describes what Spark Expectations trusts, where its boundaries are, and what a deployment has to enforce for itself. Reporting instructions are included below so they remain available in published documentation.
 
 Spark Expectations is a library that runs inside your Spark job. It has no login, no permission model, and no sandbox. Anything it does, it does with the job's own Spark session, filesystem access, network access, secret backends, and notification credentials.
+
+## Reporting a vulnerability
+
+Do not publish vulnerability details, credentials, production data, or reproduction payloads. If this repository's Security tab offers **Report a vulnerability**, use that private route. Otherwise, open an issue asking only for a private security contact, with the affected component and no technical details. The general contact in CONTRIBUTING.md is not a designated security channel. No response timeline, fix, release date, or backport is promised.
 
 ## Trust boundaries
 
@@ -40,9 +44,9 @@ YAML rule files are parsed with `yaml.safe_load`, and JSON rule files with the s
 
 If a service built on Spark Expectations takes a rule file name or path from a user, the service must enforce the boundary before it calls `load_rules`:
 
-1. Resolve the path with `os.path.realpath` and confirm that `os.path.commonpath([root, resolved]) == root` for an allowlisted root directory. A string prefix check is not enough.
-2. Check file size, and after parsing, check the number of rules, before handing the DataFrame to `SparkExpectations`.
-3. Better still, accept uploaded rule content instead of a path, and store it somewhere the job controls.
+1. Canonicalize both the allowlisted root and requested path with `os.path.realpath`, then confirm `os.path.commonpath([root, resolved]) == root`. A string prefix check is not enough. This check is safe only when untrusted users cannot replace files or path components between checking and opening them.
+2. For attacker-writable trees, use platform-appropriate descriptor-based traversal and open protections, or accept bounded uploaded content and stage it in job-owned storage. The current loader accepts paths and opens them later; it cannot consume a previously checked descriptor.
+3. Bound the content actually read, not only an earlier file-size measurement, and check the parsed rule count before passing rules to Spark. Keep staged files and their parent directories protected throughout the load.
 
 ## Plugins are trusted code
 
@@ -81,7 +85,7 @@ If people other than the job owner can write rules, put these controls around th
 - **Admission limits.** Cap file size, rule count, and expression length before rules reach Spark. Consider review or approval for `query_dq` rules, which can run any query.
 - **Resource limits.** Use cluster or pool quotas and job timeouts. The library does not bound the cost of a rule.
 - **Separate tenants.** Do not mix rules from different trust domains in one job, one rules table, or one Spark session.
-- **Fail on invalid rules in your own pipeline.** Rule validation logs warnings by default and the job continues. If invalid rules must stop a run, call `SparkExpectationsValidateRules.validate_expectations(df, rules, spark)` from `spark_expectations.utils.validate_rules` on the rules for that job before you run it, and stop if the returned dictionary is not empty. Check the return value even with `raise_exception=True`: an unknown `rule_type` is reported in the result, not raised.
+- **Fail on invalid rules in your own pipeline.** Rule validation logs warnings by default and the job continues. If invalid rules must stop a run, call `SparkExpectationsValidateRules.validate_expectations(df, rules, spark)` from `spark_expectations.utils.validate_rules` on the rules for that job before you run it, and stop if the returned dictionary is not empty. This default-mode result check also works without relying on version-specific strict-mode exception behavior.
 
 ## Dependency advisories and version ranges
 
@@ -89,7 +93,7 @@ The declared dependency ranges in `pyproject.toml` are wide. Some versions they 
 
 | Dependency | Declared range | Notes from a review on 2026-11-09 |
 |---|---|---|
-| `requests` | `>=2.28.1` | Four advisories match 2.28.1: [GHSA-gc5v-m9x4-r6x2](https://github.com/advisories/GHSA-gc5v-m9x4-r6x2), [GHSA-9hjg-9r4m-mvj7](https://github.com/advisories/GHSA-9hjg-9r4m-mvj7), [GHSA-9wx4-h78v-vm56](https://github.com/advisories/GHSA-9wx4-h78v-vm56), and [GHSA-j8r2-6x86-q33q](https://github.com/advisories/GHSA-j8r2-6x86-q33q). Source review did not find a reachable path for any of them. Install a current release anyway. |
+| `requests` | `>=2.28.1` | Four advisories match 2.28.1: [GHSA-gc5v-m9x4-r6x2](https://github.com/advisories/GHSA-gc5v-m9x4-r6x2), [GHSA-9hjg-9r4m-mvj7](https://github.com/advisories/GHSA-9hjg-9r4m-mvj7), [GHSA-9wx4-h78v-vm56](https://github.com/advisories/GHSA-9wx4-h78v-vm56), and [GHSA-j8r2-6x86-q33q](https://github.com/advisories/GHSA-j8r2-6x86-q33q). Source review did not establish a reachable path; proxy and redirect behavior was not exercised. This is not proof of non-reachability. Install a current release and assess your transport configuration. |
 | `PyYAML` | `>=6.0` | No reviewed advisory matched 6.0. Rule and configuration loading use `yaml.safe_load`. |
 | `sqlglot` | `>=21.0,<23.0` | No reviewed advisory matched 21.0. |
 | `pyspark` (optional extra) | `>=3.0.0,<=4.0.0` | Six Apache Spark advisories match 3.0.0, including [GHSA-9437-39hj-3c93](https://github.com/advisories/GHSA-9437-39hj-3c93) and [GHSA-4x9r-j582-cgr8](https://github.com/advisories/GHSA-4x9r-j582-cgr8). They concern Spark services and cluster settings (History Server, UI, proxy users, network encryption), which this library does not implement or configure. Your cluster's Spark version is your choice; keep it patched. |

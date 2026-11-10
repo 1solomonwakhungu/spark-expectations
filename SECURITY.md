@@ -24,7 +24,7 @@ The project has not published a response-time or disclosure-timeline commitment.
 
 ## Supported versions
 
-The project has not published a security support window or a backport policy. Fixes land on `main` and ship in a later release. This policy does not promise patches for earlier release lines.
+The project has not published a security support window or a backport policy. This policy does not commit maintainers to a fix, release date, or backport.
 
 | Component | Range declared at time of writing | Source |
 |---|---|---|
