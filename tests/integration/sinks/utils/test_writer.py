@@ -3655,8 +3655,11 @@ def test_write_error_stats_kafka_failure(caplog):
         
         # Downstream diagnostics must not escape through exceptions, state or logs.
         safe_message = "Kafka stats write failed; downstream error details withheld."
-        with pytest.raises(SparkExpectationsMiscException, match="Kafka stats write failed") as exc_info:
-            writer.write_error_stats()
+        from spark_expectations.sinks.utils.writer import _log
+        # Capture the package logger even when propagation is disabled by earlier tests.
+        with patch.object(_log, "handlers", [*_log.handlers, caplog.handler]):
+            with pytest.raises(SparkExpectationsMiscException, match="Kafka stats write failed") as exc_info:
+                writer.write_error_stats()
         
         # Verify Kafka write was attempted and failed
         mock_writer.assert_called_once()
