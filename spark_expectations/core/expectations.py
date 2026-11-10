@@ -29,6 +29,7 @@ from spark_expectations.sinks.utils.writer import SparkExpectationsWriter
 from spark_expectations.utils.actions import SparkExpectationsActions
 from spark_expectations.utils.reader import SparkExpectationsReader
 from spark_expectations.utils.regulate_flow import SparkExpectationsRegulateFlow
+from spark_expectations.utils.rule_dimensions import is_strict_dimension_validation, validate_rule_dimensions
 from spark_expectations.utils.validate_rules import SparkExpectationsValidateRules
 from spark_expectations.core import get_config_dict
 from spark_expectations.core.rule_validation_policy import (
@@ -235,6 +236,15 @@ class SparkExpectations:
                   including Kafka settings.
         """
         _default_notification_dict, _default_stats_streaming_dict = get_config_dict(self.spark, user_conf)
+        strict_dimension_key = user_config.se_rules_dimension_validation_strict
+        if not (
+            user_conf
+            and (strict_dimension_key in user_conf or user_conf.get(user_config.is_serverless, False))
+        ):
+            # Preserve raw strings for this boolean setting; generic casting maps "null" to None.
+            _default_notification_dict[strict_dimension_key] = self.spark.conf.get(
+                strict_dimension_key, str(_default_notification_dict.get(strict_dimension_key, False))
+            )
         _default_notification_dict[
             user_config.querydq_output_custom_table_name
         ] = f"{self.stats_table}_querydq_output"
@@ -550,6 +560,39 @@ class SparkExpectations:
         else:
             _log.info("Validation for rules completed successfully - all rules are valid")
         return outcome
+
+    def _check_rule_dimensions(
+        self,
+        expectations: Dict[str, Any],
+        notification_dict: Dict[str, Union[str, int, bool, Dict[str, str]]],
+    ) -> None:
+        """
+        Check the dimension tag of every rule selected for this run.
+
+        Unrecognised tags are logged once per rule, or raise when
+        ``spark.expectations.rules.dimension.validation.strict`` is enabled.
+        Rules and their tags are not modified.
+
+        Args:
+            expectations: Rules selected for the target table, as returned by
+                ``SparkExpectationsReader.get_rules_from_df``.
+            notification_dict: Merged user and default configuration.
+
+        Raises:
+            SparkExpectationsUserInputOrConfigInvalidException: If strict mode is
+                enabled and a rule has an unrecognised tag, or the strict setting
+                is not a boolean.
+        """
+        strict = is_strict_dimension_validation(
+            notification_dict.get(user_config.se_rules_dimension_validation_strict)
+        )
+        selected_rules = [
+            rule
+            for key, rules in expectations.items()
+            if key.endswith("_rules") and isinstance(rules, list)
+            for rule in rules
+        ]
+        validate_rule_dimensions(selected_rules, strict=strict)
 
     def _init_default_values(
         self,
@@ -1042,6 +1085,7 @@ class SparkExpectations:
                 expectations,
                 rules_execution_settings,
             ) = self.reader.get_rules_from_df(self.rules_df, target_table, params=self._context.get_dq_rules_params)
+            self._check_rule_dimensions(expectations, _notification_dict)
 
             _rules_validation_policy: str = resolve_policy(user_conf, self._read_session_conf)
             # Immutable per-decorator snapshots; each run evaluates the policy on fresh copies.
