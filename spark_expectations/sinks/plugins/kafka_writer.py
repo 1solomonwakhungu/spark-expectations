@@ -1,6 +1,5 @@
-from typing import Any, Dict, Mapping, Optional, Set, Union
+from typing import Any, Dict, Mapping, Optional, Union
 import hashlib
-import re
 
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, from_json, lit, schema_of_json
@@ -17,17 +16,6 @@ from spark_expectations.sinks.plugins.base_writer import (
 # custom user options) may carry credentials and is never rendered verbatim.
 _SAFE_SECURITY_PROTOCOLS = frozenset({"PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"})
 _SAFE_SASL_MECHANISMS = frozenset({"PLAIN", "GSSAPI", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER"})
-_SAFE_CONSTANT_VALUES = frozenset({"true", "false"}) | _SAFE_SECURITY_PROTOCOLS | _SAFE_SASL_MECHANISMS
-
-_REDACTED = "***REDACTED***"
-# Values shorter than this are not scrubbed from error text: they cannot be
-# meaningful credentials and replacing them would mangle unrelated text.
-_MIN_REDACT_LENGTH = 4
-# Matches `key="value"`, `key='value'` and `key=value` fragments, as used in JAAS
-# configuration strings, so that embedded credentials are scrubbed even when an
-# error message echoes only part of the option value.
-_EMBEDDED_VALUE_PATTERN = re.compile(r"""=\s*(?:"([^"]*)"|'([^']*)'|([^\s;"']+))""")
-
 
 def _allowlisted(value: Any, allowed: frozenset) -> str:
     if value is None:
@@ -36,7 +24,7 @@ def _allowlisted(value: Any, allowed: frozenset) -> str:
 
 
 def _topic_fingerprint(topic: Any) -> str:
-    """Return a short, non-reversible identifier for correlating a topic in logs."""
+    """Return a short identifier for correlating a topic in logs."""
     if not topic:
         return "unset"
     return "sha256:" + hashlib.sha256(str(topic).encode("utf-8")).hexdigest()[:12]
@@ -52,33 +40,6 @@ def _describe_kafka_options(kafka_options: Optional[Mapping[str, Any]]) -> str:
         f"bootstrap_servers_configured={bool(options.get('kafka.bootstrap.servers'))}, "
         f"option_count={len(options)}"
     )
-
-
-def _sensitive_fragments(kafka_options: Optional[Mapping[str, Any]]) -> Set[str]:
-    """Collect every option value, and every value embedded inside one, that must not be rendered."""
-    fragments: Set[str] = set()
-    if not isinstance(kafka_options, Mapping):
-        return fragments
-    for value in kafka_options.values():
-        if value is None:
-            continue
-        text = str(value)
-        candidates = [text]
-        for match in _EMBEDDED_VALUE_PATTERN.finditer(text):
-            candidates.extend(group for group in match.groups() if group)
-        for candidate in candidates:
-            candidate = candidate.strip()
-            if len(candidate) >= _MIN_REDACT_LENGTH and candidate not in _SAFE_CONSTANT_VALUES:
-                fragments.add(candidate)
-    return fragments
-
-
-def _redact(text: str, kafka_options: Optional[Mapping[str, Any]]) -> str:
-    # Replace longest fragments first so a full option value is redacted before
-    # any of its substrings, leaving no partial secret behind.
-    for fragment in sorted(_sensitive_fragments(kafka_options), key=len, reverse=True):
-        text = text.replace(fragment, _REDACTED)
-    return text
 
 
 class SparkExpectationsKafkaWritePluginImpl(SparkExpectationsSinkWriter):
@@ -129,12 +90,10 @@ class SparkExpectationsKafkaWritePluginImpl(SparkExpectationsSinkWriter):
 
                 _log.info("ended writing stats data into kafka stats topic")
 
-        except Exception as e:  # pylint: disable=broad-except
-            kafka_options = _write_args.get("kafka_write_options")
-            failure_message = (
-                f"Failed to write to Kafka ({_describe_kafka_options(kafka_options)}). "
-                f"Error: {type(e).__name__}: {_redact(str(e), kafka_options)}"
-            )
+        except Exception:  # pylint: disable=broad-except
+            # Downstream errors may echo transformed credentials or row contents.
+            # Do not render them or attach their traceback to the public error.
+            failure_message = "Failed to write to Kafka. Downstream error details withheld."
             _log.error(f"Kafka write failure: {failure_message}")
 
         if failure_message is not None:

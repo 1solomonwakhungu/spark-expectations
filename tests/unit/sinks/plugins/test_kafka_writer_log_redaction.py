@@ -169,8 +169,8 @@ def test_failure_scrubs_logs_exception_text_and_chain(captured_log):
     assert exc.__context__ is None
     message = str(exc)
     assert message.startswith("error occurred while saving data into kafka: Failed to write to Kafka")
-    assert "RuntimeError" in message
-    assert "not present in metadata after 60000 ms" in message
+    assert "RuntimeError" not in message
+    assert "not present in metadata after 60000 ms" not in message
     _assert_no_sentinels(message)
     _assert_no_sentinels(_full_exception_text(exc))
     _assert_no_sentinels(captured_log.getvalue())
@@ -269,3 +269,16 @@ def test_secret_backend_options_never_logged(monkeypatch, captured_log, custom_c
 
     assert builder.received_options == expected
     _assert_no_sentinels(captured_log.getvalue())
+
+
+@pytest.mark.parametrize("detail", ["x7", "c2VjcmV0", "credential-prefix", "row contents unrelated to options"])
+def test_failure_never_renders_downstream_details(captured_log, detail):
+    builder = _RecordingWriteBuilder(error=RuntimeError(detail))
+    with pytest.raises(SparkExpectationsMiscException) as error:
+        SparkExpectationsKafkaWritePluginImpl().writer(
+            {"enable_se_streaming": True, "stats_df": _FakeDataFrame(builder), "kafka_write_options": {}}
+        )
+    assert detail not in _full_exception_text(error.value)
+    assert detail not in captured_log.getvalue()
+    assert error.value.__context__ is None
+    assert error.value.__cause__ is None

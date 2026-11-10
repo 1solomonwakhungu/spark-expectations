@@ -15,7 +15,7 @@ def test_kafka_writer_exception():
         "enable_se_streaming": True
     }
 
-    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka \(topic_fingerprint=sha256:[0-9a-f]{12}, .*bootstrap_servers_configured=True, .*\)\. Error: AttributeError: .*"):
+    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka\. Downstream error details withheld\."):
         delta_writer_handler.writer(_write_args=write_args)
 
 
@@ -31,7 +31,7 @@ def test_kafka_writer_exception_missing_topic():
         "enable_se_streaming": True
     }
 
-    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka \(topic_fingerprint=unset, .*bootstrap_servers_configured=True, .*\)\. Error: .*"):
+    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka\. Downstream error details withheld\."):
         kafka_writer_handler.writer(_write_args=write_args)
 
 
@@ -58,5 +58,5 @@ def test_kafka_writer_exception_missing_servers():
         "enable_se_streaming": True
     }
 
-    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka \(topic_fingerprint=sha256:[0-9a-f]{12}, .*bootstrap_servers_configured=False, .*\)\. Error: .*"):
+    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka\. Downstream error details withheld\."):
         kafka_writer_handler.writer(_write_args=write_args)
