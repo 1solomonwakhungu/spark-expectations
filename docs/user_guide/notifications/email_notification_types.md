@@ -231,3 +231,15 @@ As seen in the template, some of the results values are nested data structures (
 __Note:__
 - If an empty string `""` is passed in to the template field in the user config, the default template will be used: ([spark_expectations/config/templates/custom_email_alert_template.jinja](../../../spark_expectations/config/templates/custom_email_alert_template.jinja)).
 - A metric name must be specified in `user_config.se_notifications_email_custom_body` if it is being referenced in the template. For example, if `{{ final_agg_dq_results }}` is referenced in the template, then `"'final_agg_dq_results': {},\n "` must be in the user config.
+
+### HTML Escaping and Template Trust
+
+Rule names, descriptions, column and table names, metric values, and other report fields can be edited by people other than the email recipients. Spark Expectations HTML-escapes these values before they are placed in an email, so a value such as `<a href="...">` shows up as text and not as a link, image, or other markup.
+
+- The packaged templates (`basic_email_alert_template.jinja`, `custom_email_alert_template.jinja`, and `advanced_email_alert_template.jinja`) enable Jinja2 autoescaping inside the template source with `{% autoescape true %}` blocks, so they escape values however the template is loaded.
+- The DQ report email (`user_config.se_dq_obs_default_email_template`) renders both the packaged template and a custom template string with autoescaping enabled. The email subject is escaped before it is added to the report body as a heading.
+- Markup written directly in a template (tables, headings, `style`, CSS classes) is trusted and renders unchanged. Values that are already `Markup` objects are not escaped a second time.
+
+**Treat custom templates as code.** A Jinja2 template can produce any HTML and can call methods on the objects passed to it, so only accept template text from people who are already trusted to change the job's configuration. Do not let lower-trust users submit templates. If that is a requirement, render their templates with Jinja2's `SandboxedEnvironment` and review the result; escaping output does not make an untrusted template safe.
+
+When you write a custom template for basic or custom-metrics emails, wrap the parts that print values in `{% autoescape true %}` ... `{% endautoescape %}` (inside a macro body if the template defines `render_table`), as the packaged templates do. Use the `|safe` filter only for values you have produced and checked yourself.

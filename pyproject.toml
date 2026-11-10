@@ -16,6 +16,8 @@ classifiers = [
 # https://www.python.org/doc/versions/
 requires-python = ">=3.9,<=3.13"
 dependencies = [
+  "Jinja2>=3.1.6,<4",
+  "MarkupSafe>=2.1",
   "pluggy>=1",
   "pyyaml>=6.0",
   "requests>=2.28.1",
