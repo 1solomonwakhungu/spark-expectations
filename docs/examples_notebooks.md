@@ -7,7 +7,7 @@ Spark Expectations ships with ready-to-run Jupyter notebooks in the [`examples/n
 The repository provides a Docker Compose setup that launches Jupyter Lab alongside Kafka and Mailpit (a local SMTP test server):
 
 ```bash
-# Generate self-signed certificates for the mail server
+# Generate a development CA and mail server certificate
 make generate-mailserver-certs
 
 # Start all services (Jupyter + Kafka + Mailpit)
@@ -64,3 +64,9 @@ In addition to notebooks, runnable Python scripts are available in [`examples/sc
 | `sample_dq_delta_streaming.py` | Streaming DQ with `WrappedDataFrameStreamWriter` |
 | `sample_dq_yaml_json.py` | Loading rules from YAML/JSON files via `load_rules_from_yaml` |
 | `base_setup.py` | Shared SparkSession setup for Delta, Iceberg, and BigQuery |
+
+### Local mail certificate trust
+
+`make generate-mailserver-certs` creates a private development CA and a 30-day server certificate valid for `mailpit`, `localhost` and `127.0.0.1`. The two local mail notebooks explicitly trust `/app/spark_expectations/containers/certs/mailpit-ca.crt` through `spark.expectations.notifications.email.smtp.ca.file`; keep TLS verification enabled. For a host-side client, use the local `containers/certs/mailpit-ca.crt` path and connect to `localhost` or `127.0.0.1`.
+
+The generator refuses to overwrite existing certificates. To renew an expired or older development certificate, stop the local stack, move the three generated certificate/key files out of `containers/certs`, rerun the generator, then rebuild the images so the server and notebook use the same CA. This is only for throwaway local development, not production PKI. Do not commit generated keys or certificates. The CA signing key is discarded after issuance, and private keys are excluded from the notebook and Kafka images.
