@@ -6,8 +6,10 @@ services:
     build:
       context: ../
       dockerfile: containers/jupyterlab/Dockerfile.notebook
+    # Development ports are published on the host loopback interface only.
+    # Binding them without a host address exposes them on every interface.
     ports:
-      - "8888:8888"
+      - "127.0.0.1:8888:8888"
     # volumes:
     #   - ./notebooks:/app/notebooks
     environment:
@@ -23,8 +25,8 @@ services:
       context: ../
       dockerfile: containers/mailserver/Dockerfile.mailpit
     ports:
-      - "8025:8025"
-      - "1025:1025"
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
     networks:
       - spark-net    
   kafka:
@@ -33,7 +35,7 @@ services:
       context: ../
       dockerfile: containers/kafka/Dockerfile.kafka
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
     networks:
       - spark-net
 networks:
