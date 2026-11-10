@@ -285,3 +285,40 @@ def test_loader_rejects_invalid_strict_option(dim_spark, yaml_path):
     with pytest.raises(SparkExpectationsUserInputOrConfigInvalidException) as exc_info:
         load_rules_from_yaml(yaml_path, dim_spark, options={STRICT_KEY: "maybe"})
     assert STRICT_KEY in str(exc_info.value)
+
+
+@pytest.mark.parametrize("value", ["null", "None", " NULL "])
+def test_session_null_strings_are_rejected(dim_spark, value):
+    dim_spark.conf.set(STRICT_KEY, value)
+    try:
+        with pytest.raises(SparkExpectationsUserInputOrConfigInvalidException, match="must be true or false"):
+            _decorate(_dataframe_rules(dim_spark), {user_config.is_serverless: False})
+    finally:
+        dim_spark.conf.unset(STRICT_KEY)
+
+
+@pytest.mark.parametrize("session_value", ["null", "None", " NULL "])
+@pytest.mark.parametrize("override", [False, None, True])
+def test_user_override_retains_precedence_over_invalid_session(dim_spark, session_value, override, dimension_log):
+    dim_spark.conf.set(STRICT_KEY, session_value)
+    try:
+        conf = {user_config.is_serverless: False, STRICT_KEY: override}
+        if override is True:
+            with pytest.raises(SparkExpectationsUserInputOrConfigInvalidException, match="unrecognized dimension tag"):
+                _decorate(_dataframe_rules(dim_spark), conf)
+            assert dimension_log.records == []
+        else:
+            _decorate(_dataframe_rules(dim_spark), conf)
+            assert len(dimension_log.records) == len(REPORTED_AT_RUNTIME)
+    finally:
+        dim_spark.conf.unset(STRICT_KEY)
+
+
+@pytest.mark.parametrize("session_value", ["null", "None", " NULL ", "true"])
+def test_serverless_keeps_session_dimension_setting_out_of_resolution(dim_spark, session_value, dimension_log):
+    dim_spark.conf.set(STRICT_KEY, session_value)
+    try:
+        _decorate(_dataframe_rules(dim_spark), {user_config.is_serverless: True})
+        assert len(dimension_log.records) == len(REPORTED_AT_RUNTIME)
+    finally:
+        dim_spark.conf.unset(STRICT_KEY)

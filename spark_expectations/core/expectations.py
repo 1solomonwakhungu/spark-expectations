@@ -228,6 +228,15 @@ class SparkExpectations:
                   including Kafka settings.
         """
         _default_notification_dict, _default_stats_streaming_dict = get_config_dict(self.spark, user_conf)
+        strict_dimension_key = user_config.se_rules_dimension_validation_strict
+        if not (
+            user_conf
+            and (strict_dimension_key in user_conf or user_conf.get(user_config.is_serverless, False))
+        ):
+            # Preserve raw strings for this boolean setting; generic casting maps "null" to None.
+            _default_notification_dict[strict_dimension_key] = self.spark.conf.get(
+                strict_dimension_key, str(_default_notification_dict.get(strict_dimension_key, False))
+            )
         _default_notification_dict[
             user_config.querydq_output_custom_table_name
         ] = f"{self.stats_table}_querydq_output"
