@@ -226,7 +226,7 @@ Every rule, regardless of input format, is normalised into a row with these 17 c
 | `expectation`                      | Yes      | The DQ rule condition (SQL expression)                                                            |
 | `column_name`                      |          | Column the rule applies to (relevant for `row_dq`)                                                |
 | `action_if_failed`                 |          | `ignore`, `drop` (row_dq only), or `fail`                                                        |
-| `tag`                              |          | Category tag (e.g. `completeness`, `validity`)                                                    |
+| `tag`                              |          | Data-quality dimension: `accuracy`, `completeness`, `consistency`, `timeliness`, `uniqueness` or `validity`. See [Dimension Tag Validation](rule_validation.md#dimension-tag-validation) |
 | `description`                      |          | Human-readable description of the rule                                                            |
 | `enable_for_source_dq_validation`  |          | Run agg/query rules on the source DataFrame                                                      |
 | `enable_for_target_dq_validation`  |          | Run agg/query rules on the post-row_dq DataFrame                                                 |
@@ -362,6 +362,7 @@ rules:
 - **Per-rule overrides**: Any field set directly on a rule overrides the value from `dq_env` or `defaults`. For example, a single rule can set its own `table_name` or `action_if_failed`.
 - **Type casting**: String values like `"true"`, `"false"`, `"1"`, `"0"` are automatically cast to their correct Python types for boolean and integer columns.
 - **Validation**: The loader validates that every rule has the required fields (`rule`, `expectation`) and a valid `rule_type` (`row_dq`, `agg_dq`, `query_dq`). Invalid rules raise `SparkExpectationsUserInputOrConfigInvalidException` with a descriptive message.
+- **Dimension tags**: Pass `options={"spark.expectations.rules.dimension.validation.strict": "true"}` (together with `dq_env` if needed) to make loading fail when a rule's `tag` is not an allowed dimension. Without it the loader does not check tags; unrecognized tags are reported as warnings when the rules run. See [Dimension Tag Validation](rule_validation.md#dimension-tag-validation).
 
 ---
 

@@ -74,3 +74,53 @@ col1 IS NOT NULL        -- No aggregate function; use row_dq instead
 | `query_dq` | `ignore`, `fail` |
 
 Using `drop` with `agg_dq` or `query_dq` will trigger a validation warning. The rule is still executed unless you fix or deactivate it in your rules table.
+
+## Dimension Tag Validation
+
+The `tag` column records the data-quality dimension a rule checks. The allowed values are:
+
+`accuracy`, `completeness`, `consistency`, `timeliness`, `uniqueness`, `validity`
+
+The same check applies to rules from a rules table or DataFrame and to rules loaded from YAML or JSON files.
+
+| Tag value | Result |
+|---|---|
+| One of the six values above | Accepted |
+| Missing, `NULL` or empty string | Accepted (no dimension) |
+| Anything else, including `Validity`, `" validity"` or a custom label such as `strict` | Reported |
+
+Matching is exact and case-sensitive. Tags are never rewritten: rules keep the value you supplied.
+
+### Default: warning
+
+When `with_expectations` is applied to a function, every active rule selected for the target table is checked once. Each rule with an unrecognized tag produces one warning that names the product, table, rule, rule type and supplied tag, lists the allowed values and, when one is close, suggests it:
+
+```
+Rule 'col1_not_null' (product_id='my_product', table_name='db.orders', rule_type='row_dq') has unrecognized dimension tag 'completness'. Allowed values (exact, lowercase): accuracy, completeness, consistency, timeliness, uniqueness, validity. Leave the tag empty if the rule has no dimension. Did you mean 'completeness'?
+```
+
+The rule still runs with its tag unchanged, so existing rules with custom tags keep working.
+
+### Strict mode
+
+Set `spark.expectations.rules.dimension.validation.strict` to `true` to reject unrecognized tags. The same key works in both places:
+
+```python
+from spark_expectations.config.user_config import Constants as user_config
+
+# Rules table or DataFrame (also applies to rules loaded from files):
+# with_expectations raises when it is applied, before the decorated function runs.
+user_conf = {user_config.se_rules_dimension_validation_strict: True}
+
+@se.with_expectations(target_table="db.orders", user_conf=user_conf)
+def build_orders():
+    ...
+
+# YAML/JSON files: load_rules raises while loading.
+rules_df = load_rules(
+    "rules.yaml",
+    options={"dq_env": "DEV", user_config.se_rules_dimension_validation_strict: "true"},
+)
+```
+
+In strict mode, `SparkExpectationsUserInputOrConfigInvalidException` is raised with one line per offending rule, and no warnings are logged. The loader checks every rule in the file; `with_expectations` checks the active rules for its target table. The setting accepts `true`/`false` (boolean or string). Any other value raises the same exception. The key can also be set in the Spark session configuration.

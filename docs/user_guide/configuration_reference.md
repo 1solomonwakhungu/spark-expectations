@@ -185,6 +185,7 @@ Set `secret_type` to choose between Databricks and Cerberus for secret storage. 
 | `user_config.querydq_output_custom_table_name` | `spark.expectations.query.dq.custom.table_name` | str | — | Custom table name for query DQ output |
 | `user_config.se_job_metadata` | `spark.expectations.job.metadata` | str/dict | `None` | Custom job metadata (serialized to JSON in stats) |
 | `user_config.is_serverless` | `spark.expectations.is.serverless` | bool | `False` | Enable Databricks Serverless mode |
+| `user_config.se_rules_dimension_validation_strict` | `spark.expectations.rules.dimension.validation.strict` | bool | `false` | Raise instead of warning when a rule's `tag` is not an allowed dimension. See [Rule Validation](rule_validation.md#dimension-tag-validation) |
 
 !!! info "Rule parameter substitution"
     Use `se_dq_rules_params` to pass dynamic values into rule expressions. For example, `{"env": "prod", "table": "orders"}` allows rules to reference `{env}` and `{table}` in their expressions.

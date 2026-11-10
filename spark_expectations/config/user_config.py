@@ -68,6 +68,9 @@ class Constants:
     se_notifications_on_error_drop_threshold = "spark.expectations.notifications.error.drop.threshold"
     se_notifications_min_priority_slack = "spark.expectations.notifications.slack.min.priority"
 
+    # declare const user config variable for rule dimension (tag) validation
+    se_rules_dimension_validation_strict = "spark.expectations.rules.dimension.validation.strict"
+
     se_enable_streaming = "se.streaming.enable"
     se_enable_error_table = "se.enable.error.table"
     se_dq_rules_params = "se.dq.rules.params"
