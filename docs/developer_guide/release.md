@@ -33,7 +33,7 @@ The `validate-version` job checks the input before any dependency is installed. 
 
 ## Version format
 
-`.github/ci/validate_release_version.sh` accepts `MAJOR.MINOR.PATCH`, with an optional lowercase `v` and no leading zeros. For example, `2.10.1` and `v2.10.1` are accepted. `V2.10.1`, `main`, `2.10`, `2.10.1.dev3`, and values containing spaces, quotes, `;`, `$`, backticks, or newlines are rejected.
+`.github/ci/validate_release_version.sh` accepts the historical `main` label and `MAJOR.MINOR.PATCH` with an optional `v` or `V` prefix and normalized Python version suffixes. It rejects incomplete versions, leading zeros in release components, whitespace, quotes, shell operators, Make expressions and newlines.
 
 The release pipeline publishes docs under the `hatch version` value (`2.10.1`). The manual workflow uses the value you type (`v2.10.1`).
 
@@ -55,3 +55,5 @@ These need repository or PyPI admin access and have not been set up:
 
 - **PyPI Trusted Publishing.** `publish-pypi` still uses the long-lived `PYPI_USERNAME`/`PYPI_PASSWORD` secrets. To switch, register this repository and `onpush.yml` as a trusted publisher on PyPI, give `publish-pypi` `id-token: write`, replace the `twine upload` step with a SHA-pinned `pypa/gh-action-pypi-publish`, and then delete the secrets.
 - **Protected environments.** Neither publish job uses a GitHub environment yet. Adding `environment:` to a job creates that environment on the next run, so create `pypi` and `github-pages` environments with required reviewers first, then reference them from `publish-pypi` and the docs jobs.
+
+The version validator also accepts the historical docs labels `main` and `V2.10.1`, and normalized Python release suffixes such as `2.11.0rc1`, `2.11.0.dev3`, `2.10.1.post1` and `2.10.1+build.1`. Shell and Make expressions, whitespace and newlines remain invalid.

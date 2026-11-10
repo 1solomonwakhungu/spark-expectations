@@ -23,16 +23,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / ".github" / "ci" / "validate_release_version.sh"
 MAKEFILE = REPO_ROOT / "makefile"
 
-VALID_VERSIONS = ["v2.10.1", "2.10.1", "v0.8.0", "0.0.0", "v10.20.30"]
+VALID_VERSIONS = ["v2.10.1", "2.10.1", "v0.8.0", "0.0.0", "v10.20.30", "V2.10.1", "main", "2.11.0a1", "2.11.0b2", "2.11.0rc1", "v2.10.1.dev3", "2.10.1.post1", "2.10.1+gabc", "2.11.0rc1.post2.dev3+build.1"]
 
 # Each payload tries to create ``{marker}`` if it is ever evaluated.
 INVALID_TEMPLATES = [
     "",
     "v2.10",
-    "v2.10.1.dev3",
-    "2.10.1+gabc",
-    "V2.10.1",
-    "main",
     "latest",
     "v02.1.0",
     "-v2.10.1",

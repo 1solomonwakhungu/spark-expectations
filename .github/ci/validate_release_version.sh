@@ -1,10 +1,10 @@
 #!/bin/sh
 # Validate a release version before it is used to publish documentation.
 #
-# Accepted grammar: an optional lowercase "v" followed by MAJOR.MINOR.PATCH,
-# where each part is a decimal number without leading zeros, for example
-# "2.10.1" (what `hatch version` reports on a release tag) or "v2.10.1"
-# (the format documented for the manual docs workflow).
+# Accepted values: the historical docs label "main", or MAJOR.MINOR.PATCH
+# with an optional v/V prefix and normalized Python prerelease, postrelease,
+# development and local-version suffixes. Only this closed ASCII grammar is
+# accepted; shell and make syntax is never valid.
 #
 # Usage: validate_release_version.sh VERSION
 # On success the version is printed unchanged and the exit status is 0.
@@ -23,7 +23,7 @@ fi
 value=$1
 
 reject() {
-    echo "error: invalid release version; expected MAJOR.MINOR.PATCH with an optional leading 'v' (for example v2.10.1)" >&2
+    echo "error: invalid release version; expected main or a supported Python release version (for example v2.10.1 or 2.11.0rc1)" >&2
     exit 1
 }
 
@@ -41,7 +41,7 @@ case $value in
     *"$newline"* | *"$carriage_return"*) reject ;;
 esac
 
-if ! printf '%s\n' "$value" | grep -Eq '^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+if ! printf '%s\n' "$value" | grep -Eq '^(main|[vV]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(a[0-9]+|b[0-9]+|rc[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?(\+[a-z0-9]+([._-][a-z0-9]+)*)?)$'; then
     reject
 fi
 
