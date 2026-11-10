@@ -36,6 +36,7 @@ from spark_expectations.core.rule_validation_policy import (
     evaluate_policy,
     install_rule_counters,
     resolve_policy,
+    secondary_query_key,
 )
 
 
@@ -491,7 +492,19 @@ class SparkExpectations:
         """
 
         def _validate_rule(rule: Dict[str, Any]) -> Any:
-            return SparkExpectationsValidateRules.validate_expectations(df=df, rules=[rule], spark=self.spark)
+            result = SparkExpectationsValidateRules.validate_expectations(df=df, rules=[rule], spark=self.spark)
+            if rule.get("rule_type") == "query_dq":
+                # Expanded rules retain executable secondary SQL outside the final expression.
+                secondary = dict(dq_queries.get(secondary_query_key(rule), {}))
+                secondary.update({key: value for key, value in rule.items()
+                                  if key.startswith("expectation_") and key != "expectation_hash"})
+                for query in secondary.values():
+                    check = SparkExpectationsValidateRules.validate_query_dq_expectation(
+                        df, {**rule, "expectation": query}, self.spark
+                    )
+                    if not check.is_valid:
+                        result.setdefault("query_dq", []).append(check)
+            return result
 
         outcome = evaluate_policy(policy, expectations, dq_queries, execution_settings, _validate_rule)
 
@@ -1041,6 +1054,15 @@ class SparkExpectations:
             @functools.wraps(func)
             def wrapper(*args: tuple, **kwargs: dict) -> DataFrame:
                 try:
+                    # Reset before supplier/count failures can expose a previous call's state.
+                    self._init_default_values(0, copy.deepcopy(_decorated_expectations))
+                    self._context.set_querydq_secondary_queries(copy.deepcopy(_decorated_dq_queries))
+                    self._context.set_rules_execution_settings_config(dict(_decorated_execution_settings))
+                    install_rule_counters(self._context, _decorated_expectations)
+                    self._context.set_rules_validation_policy_result(
+                        _rules_validation_policy,
+                        {"num_invalid_rules": 0, "num_skipped_rules": 0, "input_counted": 0}, [], [],
+                    )
                     _log.info("The function dataframe is getting created")
                     _df: DataFrame = func(*args, **kwargs)
                     table_name: str = self._context.get_table_name

@@ -55,15 +55,15 @@ Validation runs on every call of the decorated function, against the DataFrame t
 
 - Skipped rules are not passed to the row, aggregate or query stages, so they never appear as passed or failed.
 - If every rule of a stage is skipped, that stage does not run. For example, when every `agg_dq` rule is invalid, source and target aggregate checks are skipped.
-- Rule counters in the stats table (`num_row_dq_rules`, `agg_dq_rules`, `query_dq_rules`, `num_dq_rules`) count only the rules that ran.
+- Rule counters in the stats table (`num_row_dq_rules`, `agg_dq_rules`, `query_dq_rules`, `num_dq_rules`) count the rules selected to run, not proof that each stage completed.
 - Secondary queries of a skipped composite `query_dq` rule are removed for that run.
 
 ## `fail` details
 
 The decorated function's DataFrame is created and validated, then the run stops. No rule executes and the input is not counted. As with any other failure:
 
-- a stats row is written with `dq_status.run_status = "Failed"`;
-- the caller receives `SparkExpectationsMiscException`, whose message lists every invalid rule and its validation error.
+- the library attempts to write a stats row with `dq_status.run_status = "Failed"`;
+- if failure reporting succeeds, the caller receives `SparkExpectationsMiscException`, whose message lists every invalid rule and its validation error. A stats-sink or notification failure can replace that diagnostic; a persisted failure row is not guaranteed.
 
 On this row `input_count` is `0` because the input was never counted, not because it was empty. `dq_rules.invalid_rules.input_counted` is `0` in that case (see below).
 
@@ -85,7 +85,7 @@ For every run of a decorated function, the `dq_rules` column of the stats table 
 |---|---|
 | `num_invalid_rules` | Number of selected rules that failed validation, counting each occurrence. |
 | `num_skipped_rules` | Number of rules removed from this run. Always `0` unless the policy is `skip_invalid`. |
-| `input_counted` | `1` when `input_count` was measured, `0` when it was not (a `fail` stop, or a streaming DataFrame). |
+| `input_counted` | `1` when `input_count` was measured, `0` when it was not (a `fail` stop, supplier/count failure, or a streaming DataFrame). |
 
 Under `warn_and_run`, invalid rules still run and their results are reported as usual; `num_invalid_rules` shows how many of them failed validation.
 
@@ -98,3 +98,5 @@ Each invalid rule produces a warning containing its identifier, the policy and t
 - Keep `warn_and_run` if you rely on current behavior and want no change.
 - Use `skip_invalid` when partial checking is acceptable and you monitor `num_skipped_rules`. A skipped rule checks nothing, so a run with skipped rules can pass data that the rule would have rejected.
 - Use `fail` when every rule must be checked before data is written, for example when the rules table is edited by people other than the pipeline owner.
+
+Before validation starts, invalid/skipped counts and identifiers are reset to zero/empty. A supplier failure therefore reports no observed validation failures, rather than reusing the previous run. Zero invalid rules does not establish that validation completed.
