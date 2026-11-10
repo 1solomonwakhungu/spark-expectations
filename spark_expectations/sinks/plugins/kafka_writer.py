@@ -1,12 +1,45 @@
-from typing import Dict, Union
+from typing import Any, Dict, Mapping, Optional, Union
+import hashlib
+
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, from_json, lit, schema_of_json
+
+from spark_expectations import _log
+from spark_expectations.core.exceptions import SparkExpectationsMiscException
 from spark_expectations.sinks.plugins.base_writer import (
     SparkExpectationsSinkWriter,
     spark_expectations_writer_impl,
 )
-from spark_expectations.core.exceptions import SparkExpectationsMiscException
-from spark_expectations import _log
+
+# Only values from these closed sets are ever written to logs or exception text.
+# Every other Kafka option (JAAS config, endpoints, bootstrap servers, topic,
+# custom user options) may carry credentials and is never rendered verbatim.
+_SAFE_SECURITY_PROTOCOLS = frozenset({"PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"})
+_SAFE_SASL_MECHANISMS = frozenset({"PLAIN", "GSSAPI", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER"})
+
+def _allowlisted(value: Any, allowed: frozenset) -> str:
+    if value is None:
+        return "unset"
+    return value if isinstance(value, str) and value in allowed else "other"
+
+
+def _topic_fingerprint(topic: Any) -> str:
+    """Return a short identifier for correlating a topic in logs."""
+    if not topic:
+        return "unset"
+    return "sha256:" + hashlib.sha256(str(topic).encode("utf-8")).hexdigest()[:12]
+
+
+def _describe_kafka_options(kafka_options: Optional[Mapping[str, Any]]) -> str:
+    """Build a log-safe description of Kafka options from allowlisted metadata only."""
+    options = kafka_options if isinstance(kafka_options, Mapping) else {}
+    return (
+        f"topic_fingerprint={_topic_fingerprint(options.get('topic'))}, "
+        f"security_protocol={_allowlisted(options.get('kafka.security.protocol'), _SAFE_SECURITY_PROTOCOLS)}, "
+        f"sasl_mechanism={_allowlisted(options.get('kafka.sasl.mechanism'), _SAFE_SASL_MECHANISMS)}, "
+        f"bootstrap_servers_configured={bool(options.get('kafka.bootstrap.servers'))}, "
+        f"option_count={len(options)}"
+    )
 
 
 class SparkExpectationsKafkaWritePluginImpl(SparkExpectationsSinkWriter):
@@ -29,24 +62,15 @@ class SparkExpectationsKafkaWritePluginImpl(SparkExpectationsSinkWriter):
         if transport not in (None, "kafka_native"):
             return
 
+        failure_message: Optional[str] = None
         try:
-            # kafka_options = {
-            #     "kafka.bootstrap.servers": "localhost:9092",
-            #     "topic": _write_args.get("nsp_topic_name"),
-            #     "failOnDataLoss": "true",
-            # }
-
-            _log.debug(f"_write_args: {_write_args}")
-
             if _write_args.pop("enable_se_streaming"):
                 _log.info("started write stats data into kafka stats topic")
 
                 df: DataFrame = _write_args.get("stats_df")
                 kafka_options = _write_args.get("kafka_write_options")
-                
-                # Log Kafka connection details (mask sensitive info)
-                masked_options = {k: (v if "password" not in k.lower() and "secret" not in k.lower() and "token" not in k.lower() else "***MASKED***") for k, v in kafka_options.items()}
-                _log.info(f"Writing to Kafka with options: {masked_options}")
+
+                _log.info(f"Writing to Kafka ({_describe_kafka_options(kafka_options)})")
 
                 # Convert se_job_metadata from JSON string to a proper struct
                 # so it appears as a nested object in the Kafka JSON output
@@ -66,13 +90,15 @@ class SparkExpectationsKafkaWritePluginImpl(SparkExpectationsSinkWriter):
 
                 _log.info("ended writing stats data into kafka stats topic")
 
-        except Exception as e:
-            # Log detailed error information
-            kafka_options = _write_args.get("kafka_write_options", {})
-            topic = kafka_options.get("topic", "unknown")
-            bootstrap_servers = kafka_options.get("kafka.bootstrap.servers", "unknown")
-            
-            error_details = f"Failed to write to Kafka topic '{topic}' on servers '{bootstrap_servers}'. Error: {str(e)}"
-            _log.error(f"Kafka write failure: {error_details}")
-            
-            raise SparkExpectationsMiscException(f"error occurred while saving data into kafka: {error_details}")
+        except Exception:  # pylint: disable=broad-except
+            # Downstream errors may echo transformed credentials or row contents.
+            # Do not render them or attach their traceback to the public error.
+            failure_message = "Failed to write to Kafka. Downstream error details withheld."
+            _log.error(f"Kafka write failure: {failure_message}")
+
+        if failure_message is not None:
+            # Raised outside the except block so the original exception, whose text
+            # and traceback may contain Kafka option values, is not attached as
+            # ordinary __context__ or __cause__. Suppress any ambient caller context
+            # in default traceback formatting as well.
+            raise SparkExpectationsMiscException(f"error occurred while saving data into kafka: {failure_message}") from None

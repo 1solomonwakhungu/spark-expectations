@@ -15,7 +15,7 @@ def test_kafka_writer_exception():
         "enable_se_streaming": True
     }
 
-    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka topic 'dq-sparkexpectations-stats' on servers 'localhost:9092'.*"):
+    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka\. Downstream error details withheld\."):
         delta_writer_handler.writer(_write_args=write_args)
 
 
@@ -31,7 +31,7 @@ def test_kafka_writer_exception_missing_topic():
         "enable_se_streaming": True
     }
 
-    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka topic 'unknown' on servers 'localhost:9092'.*"):
+    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka\. Downstream error details withheld\."):
         kafka_writer_handler.writer(_write_args=write_args)
 
 
@@ -58,5 +58,5 @@ def test_kafka_writer_exception_missing_servers():
         "enable_se_streaming": True
     }
 
-    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka topic 'dq-sparkexpectations-stats' on servers 'unknown'.*"):
+    with pytest.raises(SparkExpectationsMiscException, match=r"error occurred while saving data into kafka: Failed to write to Kafka\. Downstream error details withheld\."):
         kafka_writer_handler.writer(_write_args=write_args)

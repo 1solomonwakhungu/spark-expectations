@@ -38,7 +38,7 @@ A simpler format without ``dq_env`` is also supported, using a top-level
 """
 
 import numbers
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from pyspark.sql import DataFrame
 from pyspark.sql.session import SparkSession
@@ -275,32 +275,41 @@ def _describe_lossy_coercion(col: str, value: Any) -> Optional[str]:
         return None
 
     if col in BOOLEAN_COLUMNS:
-        if not isinstance(value, str):
-            return None
-        lowered = value.lower()
-        if lowered in TRUE_BOOLEAN_STRINGS or lowered in FALSE_BOOLEAN_STRINGS:
-            return None
-        message = f"unrecognized boolean string {_short_repr(value)} is treated as False"
-        stripped = value.strip().lower()
-        if stripped in TRUE_BOOLEAN_STRINGS or stripped in FALSE_BOOLEAN_STRINGS:
-            return f"{message}; remove the surrounding whitespace"
-        return (
-            f"{message}; use true or false (recognized strings, case-insensitive: "
-            f"{', '.join(repr(s) for s in TRUE_BOOLEAN_STRINGS + FALSE_BOOLEAN_STRINGS)})"
-        )
-
+        return _describe_boolean_coercion(value)
     if col in INT_COLUMNS:
-        if isinstance(value, (bool, str, numbers.Integral)) or not isinstance(value, numbers.Number):
-            return None
-        try:
-            truncated = int(value)
-        except (ArithmeticError, ValueError, TypeError):
-            return None
-        if value == truncated:
-            return None
-        return f"fractional value {_short_repr(value)} is truncated to {_short_repr(truncated)}; use a whole number"
-
+        return _describe_integer_coercion(value)
     return None
+
+
+def _describe_boolean_coercion(value: Any) -> Optional[str]:
+    """Describe unrecognized boolean spellings without changing conversion."""
+    if not isinstance(value, str):
+        return None
+    lowered = value.lower()
+    if lowered in TRUE_BOOLEAN_STRINGS or lowered in FALSE_BOOLEAN_STRINGS:
+        return None
+    message = f"unrecognized boolean string {_short_repr(value)} is treated as False"
+    stripped = value.strip().lower()
+    if stripped in TRUE_BOOLEAN_STRINGS or stripped in FALSE_BOOLEAN_STRINGS:
+        return f"{message}; remove the surrounding whitespace"
+    return (
+        f"{message}; use true or false (recognized strings, case-insensitive: "
+        f"{', '.join(repr(s) for s in TRUE_BOOLEAN_STRINGS + FALSE_BOOLEAN_STRINGS)})"
+    )
+
+
+def _describe_integer_coercion(value: Any) -> Optional[str]:
+    """Describe fractional truncation while leaving rejected numbers to the normalizer."""
+    if isinstance(value, (bool, str, numbers.Integral)) or not isinstance(value, numbers.Number):
+        return None
+    try:
+        # Number does not guarantee int conversion; unsupported values are handled below.
+        truncated = int(cast(Any, value))
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+    if value == truncated:
+        return None
+    return f"fractional value {_short_repr(value)} is truncated to {_short_repr(truncated)}; use a whole number"
 
 
 def _warn_lossy_coercions(row: Dict[str, Any], sources: List[Tuple[str, Dict[str, Any]]]) -> None:
