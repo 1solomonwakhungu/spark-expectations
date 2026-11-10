@@ -1,8 +1,10 @@
-from typing import Any
-
 """Failures must retain only current-call state and reject secondary SQL."""
+
+from typing import Any, List
 from unittest.mock import patch
 import pytest
+from pyspark.sql.types import StructType, StructField, BooleanType
+from spark_expectations.core.expectations import SparkExpectations, WrappedDataFrameWriter
 from tests.unit.core import test_rule_validation_policy_runtime as rt
 from tests.unit.core.test_rule_validation_policy_runtime import fixture_spark_session, fixture_input_df, fixture_sinks
 from spark_expectations.core.exceptions import SparkExpectationsMiscException
@@ -11,7 +13,7 @@ from spark_expectations.core.exceptions import SparkExpectationsMiscException
 def test_supplier_failure_resets_policy_stats(spark_session: Any, input_df: Any, sinks: Any) -> None:
     se = rt._se(spark_session, [rt.VALID_ROW, rt.INVALID_ROW])
     rt._stub_stages(se, input_df)
-    calls = []
+    calls: List[int] = []
 
     def supplier() -> Any:
         if calls:
@@ -78,10 +80,6 @@ def test_invalid_secondary_never_reaches_execution(spark_session: Any, input_df:
             run()
     assert "SELEC FROM" not in seen
     assert sinks["stats"][-1]["invalid_rule_stats"]["num_invalid_rules"] == 1
-
-
-from pyspark.sql.types import StructType, StructField, BooleanType
-from spark_expectations.core.expectations import SparkExpectations, WrappedDataFrameWriter
 
 
 @pytest.mark.parametrize("bad_last", [False, True])

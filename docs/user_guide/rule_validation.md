@@ -1,6 +1,6 @@
 # Rule Validation
 
-Spark Expectations validates rules before the DQ pipeline runs. Invalid rules produce **warning logs** instead of failing the validation step. They are **not skipped**, however — malformed rules can still cause runtime failures during execution.
+Spark Expectations validates selected active rules before the DQ pipeline runs. The default `warn_and_run` policy logs validation failures and still executes those rules, so malformed rules can cause runtime failures. The optional `skip_invalid` and `fail` policies change this behavior; see [Rule Validation Policy](rule_validation_policy.md).
 
 ## What Gets Validated
 
@@ -19,7 +19,7 @@ Additionally, for all rule types:
 
 ## Non-Blocking Validation
 
-When a rule fails validation:
+Under the default `warn_and_run` policy, when a rule fails validation:
 
 1. A warning is logged with details about the validation failure.
 2. The validation step continues without raising an exception.
@@ -85,6 +85,6 @@ col1 IS NOT NULL        -- No aggregate function; use row_dq instead
 | `agg_dq` | `ignore`, `fail` |
 | `query_dq` | `ignore`, `fail` |
 
-Using `drop` with `agg_dq` or `query_dq` will trigger a validation warning. The rule is still executed unless you fix or deactivate it in your rules table.
+Using `drop` with `agg_dq` or `query_dq` will trigger a validation warning. Under the default `warn_and_run` policy, the rule is still executed unless you fix or deactivate it. Use the explicit runtime policy to skip invalid rules or stop before execution.
 
 Values are case-sensitive. A missing or empty `action_if_failed` passes validation; when rules are read for execution, it defaults to `ignore`.
