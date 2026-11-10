@@ -3577,7 +3577,7 @@ def test_write_error_stats_kafka_success():
         assert context.get_kafka_write_error_message == ""
 
 
-def test_write_error_stats_kafka_failure():
+def test_write_error_stats_kafka_failure(caplog):
     """
     Test Kafka write failure in write_error_stats method
     """
@@ -3645,7 +3645,7 @@ def test_write_error_stats_kafka_failure():
     
     # Mock Kafka write failure
     with patch("spark_expectations.sinks._sink_hook.writer") as mock_writer:
-        mock_writer.side_effect = Exception("Kafka broker unreachable")
+        mock_writer.side_effect = Exception("Kafka broker unreachable secret-sentinel-318")
         
         # Mock get_kafka_write_options
         writer.get_kafka_write_options = Mock(return_value={"kafka.bootstrap.servers": "localhost:9092"})
@@ -3653,14 +3653,21 @@ def test_write_error_stats_kafka_failure():
         # Mock save_df_as_table to prevent actual table operations
         writer.save_df_as_table = Mock()
         
-        # Call write_error_stats and expect it to raise the Kafka exception
-        with pytest.raises(Exception, match="Kafka broker unreachable"):
+        # Downstream diagnostics must not escape through exceptions, state or logs.
+        safe_message = "Kafka stats write failed; downstream error details withheld."
+        with pytest.raises(SparkExpectationsMiscException, match="Kafka stats write failed") as exc_info:
             writer.write_error_stats()
         
         # Verify Kafka write was attempted and failed
         mock_writer.assert_called_once()
         assert context.get_kafka_write_status == "Failed"
-        assert "Kafka broker unreachable" in context.get_kafka_write_error_message
+        assert context.get_kafka_write_error_message == safe_message
+        assert safe_message in caplog.text
+        import traceback
+        rendered = "".join(traceback.format_exception(type(exc_info.value), exc_info.value, exc_info.tb))
+        for output in (str(exc_info.value), context.get_kafka_write_error_message, caplog.text, rendered):
+            assert "Kafka broker unreachable" not in output
+            assert "secret-sentinel-318" not in output
 
 
 def test_write_error_stats_kafka_disabled():
