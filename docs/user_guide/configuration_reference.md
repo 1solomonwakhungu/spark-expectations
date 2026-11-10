@@ -47,6 +47,9 @@ You can also pass these keys to `stats_streaming_options`, `notification_config`
     | `user_config.se_notifications_smtp_user_name` | `spark.expectations.notifications.smtp.user.name` | str | `""` | SMTP username |
     | `user_config.se_notifications_email_smtp_host` | `spark.expectations.notifications.email.smtp.host` | str | `""` | SMTP host |
     | `user_config.se_notifications_email_smtp_port` | `spark.expectations.notifications.email.smtp.port` | int | `25` | SMTP port |
+    | `user_config.se_notifications_email_smtp_tls_mode` | `spark.expectations.notifications.email.smtp.tls.mode` | str | `"starttls"` | `starttls` (upgrade with STARTTLS) or `ssl` (implicit TLS, usually port 465). The server certificate and host name are always verified |
+    | `user_config.se_notifications_email_smtp_ca_file` | `spark.expectations.notifications.email.smtp.ca.file` | str | `""` | PEM CA bundle used instead of the system trust store to verify the SMTP server (for private CAs) |
+    | `user_config.se_notifications_email_smtp_timeout` | `spark.expectations.notifications.email.smtp.timeout.sec` | float | `30` | Timeout in seconds for the SMTP connection and each SMTP command; must be greater than 0 and at most 300 |
     | `user_config.se_notifications_email_from` | `spark.expectations.notifications.email.from` | str | `""` | Sender email |
     | `user_config.se_notifications_email_to_other_mail_id` | `spark.expectations.notifications.email.to.other.mail.com` | str | `""` | Recipient email(s) |
     | `user_config.se_notifications_email_subject` | `spark.expectations.notifications.email.subject` | str | `"spark-expectations-testing"` | Email subject line |
@@ -185,6 +188,7 @@ Set `secret_type` to choose between Databricks and Cerberus for secret storage. 
 | `user_config.querydq_output_custom_table_name` | `spark.expectations.query.dq.custom.table_name` | str | — | Custom table name for query DQ output |
 | `user_config.se_job_metadata` | `spark.expectations.job.metadata` | str/dict | `None` | Custom job metadata (serialized to JSON in stats) |
 | `user_config.is_serverless` | `spark.expectations.is.serverless` | bool | `False` | Enable Databricks Serverless mode |
+| `user_config.se_rules_dimension_validation_strict` | `spark.expectations.rules.dimension.validation.strict` | bool | `false` | Raise instead of warning when a rule's `tag` is not an allowed dimension. See [Rule Validation](rule_validation.md#dimension-tag-validation) |
 
 !!! info "Rule parameter substitution"
     Use `se_dq_rules_params` to pass dynamic values into rule expressions. For example, `{"env": "prod", "table": "orders"}` allows rules to reference `{env}` and `{table}` in their expressions.

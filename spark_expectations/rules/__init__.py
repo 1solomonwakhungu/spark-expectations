@@ -59,7 +59,11 @@ def load_rules(
         path: File path readable by Python (local, DBFS fuse, mounted volume).
         spark: Optional SparkSession; if ``None`` the active session is used.
         format: ``"auto"`` (detect from extension), ``"yaml"``, or ``"json"``.
-        options: Extra options forwarded to the loader plugin.
+        options: Extra options forwarded to the loader plugin. The built-in
+            loaders accept ``dq_env`` and
+            ``spark.expectations.rules.dimension.validation.strict``; when the
+            latter is ``"true"``, a rule whose ``tag`` is not an allowed
+            dimension makes loading fail.
 
     Returns:
         A Spark DataFrame with the standard rules schema.

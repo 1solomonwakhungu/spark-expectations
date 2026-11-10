@@ -7,6 +7,9 @@ spark.expectations.notifications.email.default.basic.template: ""
 spark.expectations.notifications.email.custom.template: ""
 spark.expectations.notifications.email.smtp.host: ""
 spark.expectations.notifications.email.smtp.port: 25
+spark.expectations.notifications.email.smtp.tls.mode: "starttls"
+spark.expectations.notifications.email.smtp.ca.file: ""
+spark.expectations.notifications.email.smtp.timeout.sec: 30
 spark.expectations.notifications.email.smtp.password: ""
 spark.expectations.notifications.email.from: ""
 spark.expectations.notifications.email.to.other.mail.com: ""
@@ -28,6 +31,7 @@ spark.expectations.notifications.error.drop.threshold: 100
 spark.expectations.agg.dq.detailed.stats: false
 spark.expectations.query.dq.detailed.stats: false
 spark.expectations.job.metadata: None
+spark.expectations.rules.dimension.validation.strict: false
 se.streaming.enable: true
 se.streaming.stats.kafka.custom.config.enable: false
 se.streaming.stats.topic.name: "dq-sparkexpectations-stats"
