@@ -823,6 +823,19 @@ class SparkExpectationsWriter:
             source_query_dq_result: Optional[List[Dict[str, str]]] = self._context.get_source_query_dq_result
             final_query_dq_result: Optional[List[Dict[str, str]]] = self._context.get_final_query_dq_result
 
+            dq_rules_counts: Dict[str, Any] = {
+                "rules": {
+                    "num_row_dq_rules": self._context.get_num_row_dq_rules,
+                    "num_dq_rules": self._context.get_num_dq_rules,
+                },
+                "agg_dq_rules": self._context.get_num_agg_dq_rules,
+                "query_dq_rules": self._context.get_num_query_dq_rules,
+            }
+            # Present only for runs that evaluated the rule validation policy.
+            invalid_rule_stats = getattr(self._context, "get_invalid_rule_stats", None)
+            if isinstance(invalid_rule_stats, dict):
+                dq_rules_counts["invalid_rules"] = invalid_rule_stats
+
             error_stats_data = [
                 (
                     self._context.product_id,
@@ -855,14 +868,7 @@ class SparkExpectationsWriter:
                         "final_agg_dq_run_time": self._context.get_final_agg_dq_run_time,
                         "final_query_dq_run_time": self._context.get_final_query_dq_run_time,
                     },
-                    {
-                        "rules": {
-                            "num_row_dq_rules": self._context.get_num_row_dq_rules,
-                            "num_dq_rules": self._context.get_num_dq_rules,
-                        },
-                        "agg_dq_rules": self._context.get_num_agg_dq_rules,
-                        "query_dq_rules": self._context.get_num_query_dq_rules,
-                    },
+                    dq_rules_counts,
                     self._context.get_run_id,
                     date.fromisoformat(self._context.get_run_date[0:10]),
                     datetime.strptime(

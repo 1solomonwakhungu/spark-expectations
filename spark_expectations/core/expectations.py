@@ -1,3 +1,4 @@
+import copy
 import functools
 import importlib
 from dataclasses import dataclass
@@ -36,6 +37,13 @@ from spark_expectations.utils.regulate_flow import SparkExpectationsRegulateFlow
 from spark_expectations.utils.rule_dimensions import is_strict_dimension_validation, validate_rule_dimensions
 from spark_expectations.utils.validate_rules import SparkExpectationsValidateRules
 from spark_expectations.core import get_config_dict
+from spark_expectations.core.rule_validation_policy import (
+    PolicyOutcome,
+    evaluate_policy,
+    install_rule_counters,
+    resolve_policy,
+    secondary_query_key,
+)
 
 
 def get_spark_minor_version() -> float:
@@ -455,6 +463,108 @@ class SparkExpectations:
             )
         else:
             _log.info("Validation for rules completed successfully - all rules are valid")
+
+    def _read_session_conf(self, key: str) -> Optional[str]:
+        """
+        Return the raw Spark session configuration value for ``key``, or None if unset.
+
+        A session that cannot read configuration (for example a restricted serverless
+        session) is treated as unset, and a warning is logged.
+        """
+        try:
+            value = self.spark.conf.get(key, None)
+        except Exception as e:  # pylint: disable=broad-except
+            _log.warning(f"Could not read Spark configuration '{key}', using the default: {e}")
+            return None
+        return value
+
+    def _apply_rules_validation_policy(
+        self,
+        df: "DataFrame",
+        policy: str,
+        expectations: Dict[str, Any],
+        dq_queries: Dict[str, Any],
+        execution_settings: Dict[str, Any],
+    ) -> PolicyOutcome:
+        """
+        Validate the rules selected for this run and install this run's rule state.
+
+        Only the rules that would execute are validated: the formatted, active rules
+        for the target table, including any of unknown rule type. The full rule state
+        (expectations, secondary queries, stage flags, rule counters and policy counts)
+        is installed in the context on every call, so no value from an earlier run
+        survives into this one. The decoration-time arguments are not modified.
+
+        Args:
+            df: The DataFrame returned by the decorated function.
+            policy: Canonical rule validation policy.
+            expectations: Decoration-time expectations.
+            dq_queries: Decoration-time secondary query map.
+            execution_settings: Decoration-time stage flags.
+
+        Returns:
+            PolicyOutcome: The rule state to use for this run.
+        """
+
+        def _validate_rule(rule: Dict[str, Any]) -> Any:
+            result = SparkExpectationsValidateRules.validate_expectations(df=df, rules=[rule], spark=self.spark)
+            if rule.get("rule_type") == "query_dq":
+                # Expanded rules retain executable secondary SQL outside the final expression.
+                secondary = dict(dq_queries.get(secondary_query_key(rule), {}))
+                fields = {
+                    key[len("expectation_") :]: value
+                    for key, value in rule.items()
+                    if key.startswith("expectation_") and key != "expectation_hash"
+                }
+                if fields:
+                    # Execution resolves shared map keys against this occurrence's fields.
+                    secondary = {key: fields.get(key) for key in secondary}
+                    secondary.update(fields)
+                for query in secondary.values():
+                    check = SparkExpectationsValidateRules.validate_query_dq_expectation(
+                        df, {**rule, "expectation": query}, self.spark
+                    )
+                    if not check.is_valid:
+                        result.setdefault("query_dq", []).append(check)
+            return result
+
+        outcome = evaluate_policy(policy, expectations, dq_queries, execution_settings, _validate_rule)
+
+        self._context.set_dq_expectations(outcome.expectations)
+        self._context.set_querydq_secondary_queries(outcome.dq_queries)
+        self._context.set_rules_execution_settings_config(outcome.execution_settings)
+        install_rule_counters(self._context, outcome.expectations)
+        self._context.set_rules_validation_policy_result(
+            outcome.policy,
+            {**outcome.stats, "input_counted": 0},
+            [item.identity.display() for item in outcome.invalid_rules],
+            [item.identity.display() for item in outcome.skipped_rules],
+        )
+
+        for item in outcome.invalid_rules:
+            # pylint: disable=logging-too-many-args
+            _log.warning(
+                "Invalid rule %s (policy '%s'): %s",
+                item.identity.display(),
+                outcome.policy,
+                " | ".join(item.errors) or "invalid",
+            )
+        if outcome.invalid_rules:
+            # pylint: disable=logging-too-many-args
+            _log.warning(
+                "Some rules failed validation: %d of %d rule(s) invalid; policy '%s' %s.",
+                len(outcome.invalid_rules),
+                outcome.validated_rule_count,
+                outcome.policy,
+                {
+                    "warn_and_run": "runs every rule, including the invalid ones",
+                    "skip_invalid": f"skips {len(outcome.skipped_rules)} rule(s) in this run",
+                    "fail": "stops the run before any rule executes",
+                }[outcome.policy],
+            )
+        else:
+            _log.info("Validation for rules completed successfully - all rules are valid")
+        return outcome
 
     def _check_rule_dimensions(
         self,
@@ -982,11 +1092,12 @@ class SparkExpectations:
             ) = self.reader.get_rules_from_df(self.rules_df, target_table, params=self._context.get_dq_rules_params)
             self._check_rule_dimensions(expectations, _notification_dict)
 
-            _row_dq: bool = rules_execution_settings.get("row_dq", False)
-            _source_agg_dq: bool = rules_execution_settings.get("source_agg_dq", False)
-            _target_agg_dq: bool = rules_execution_settings.get("target_agg_dq", False)
-            _source_query_dq: bool = rules_execution_settings.get("source_query_dq", False)
-            _target_query_dq: bool = rules_execution_settings.get("target_query_dq", False)
+            _rules_validation_policy: str = resolve_policy(user_conf, self._read_session_conf)
+            # Immutable per-decorator snapshots; each run evaluates the policy on fresh copies.
+            _decorated_expectations: Dict[str, Any] = copy.deepcopy(expectations)
+            _decorated_dq_queries: Dict[str, Any] = copy.deepcopy(dq_queries_dict)
+            _decorated_execution_settings: Dict[str, Any] = dict(rules_execution_settings)
+
             _target_table_view: str = target_table_view if target_table_view else f"{target_table.split('.')[-1]}_view"
 
             self._set_notification_context(_notification_dict, _se_stats_streaming_dict)
@@ -999,14 +1110,49 @@ class SparkExpectations:
             @functools.wraps(func)
             def wrapper(*args: tuple, **kwargs: dict) -> DataFrame:
                 try:
+                    # Reset before supplier/count failures can expose a previous call's state.
+                    self._init_default_values(0, copy.deepcopy(_decorated_expectations))
+                    self._context.set_querydq_secondary_queries(copy.deepcopy(_decorated_dq_queries))
+                    self._context.set_rules_execution_settings_config(dict(_decorated_execution_settings))
+                    install_rule_counters(self._context, _decorated_expectations)
+                    self._context.set_rules_validation_policy_result(
+                        _rules_validation_policy,
+                        {"num_invalid_rules": 0, "num_skipped_rules": 0, "input_counted": 0},
+                        [],
+                        [],
+                    )
                     _log.info("The function dataframe is getting created")
                     _df: DataFrame = func(*args, **kwargs)
                     table_name: str = self._context.get_table_name
 
-                    rules = [row.asDict() for row in self.rules_df.collect()]
-                    self._check_invalid_rules(_df, rules)
+                    _policy_outcome = self._apply_rules_validation_policy(
+                        _df,
+                        _rules_validation_policy,
+                        _decorated_expectations,
+                        _decorated_dq_queries,
+                        _decorated_execution_settings,
+                    )
+                    _run_expectations: Dict[str, Any] = _policy_outcome.expectations
+                    _run_settings = _policy_outcome.execution_settings
+                    _row_dq: bool = _run_settings.get("row_dq", False)
+                    _source_agg_dq: bool = _run_settings.get("source_agg_dq", False)
+                    _target_agg_dq: bool = _run_settings.get("target_agg_dq", False)
+                    _source_query_dq: bool = _run_settings.get("source_query_dq", False)
+                    _target_query_dq: bool = _run_settings.get("target_query_dq", False)
+
+                    if _policy_outcome.should_fail:
+                        # Reset the per-run stats before failing; the input is not counted.
+                        self._init_default_values(0, _run_expectations)
+                        raise SparkExpectationsUserInputOrConfigInvalidException(_policy_outcome.failure_message())
 
                     _input_count = _df.count() if not _df.isStreaming else 0
+                    if not _df.isStreaming:
+                        self._context.set_rules_validation_policy_result(
+                            _policy_outcome.policy,
+                            {**_policy_outcome.stats, "input_counted": 1},
+                            self._context.get_invalid_rule_ids,
+                            self._context.get_skipped_rule_ids,
+                        )
                     _log.info(f"data frame input record count: {_input_count}")
                     _output_count: int = 0
                     _error_count: int = 0
@@ -1014,7 +1160,7 @@ class SparkExpectations:
                     _row_dq_df: DataFrame = _df
                     _ignore_rules_result: List[Optional[List[Dict[str, Any]]]] = []
 
-                    self._init_default_values(_input_count, expectations)
+                    self._init_default_values(_input_count, _run_expectations)
                     _log.info(f"Spark Expectations run id for this run: {self._context.get_run_id}")
 
                     if isinstance(_df, DataFrame):  # type: ignore
@@ -1028,7 +1174,7 @@ class SparkExpectations:
                             _actions=self.actions,
                             _writer=self._writer,
                             _notification=self._notification,
-                            expectations=expectations,
+                            expectations=_run_expectations,
                             _input_count=_input_count,
                         )
 

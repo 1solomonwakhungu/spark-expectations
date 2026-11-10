@@ -130,6 +130,9 @@ class Constants:
 
     querydq_output_custom_table_name = "spark.expectations.query.dq.custom.table_name"
 
+    # runtime policy for rules that fail validation: "warn_and_run" (default), "skip_invalid" or "fail"
+    se_rules_validation_policy = "spark.expectations.rules.validation.policy"
+
     # declare const variable for agg query dq detailed stats
 
     se_agg_dq_expectation_regex_pattern = r"(\(.+?\)|\w+\(.+?\))(\s*[<>!=]+\s*.+|\s*between\s*.+)$"
