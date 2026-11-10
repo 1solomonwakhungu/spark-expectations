@@ -30,7 +30,7 @@ def _topic_fingerprint(topic: Any) -> str:
     return "sha256:" + hashlib.sha256(str(topic).encode("utf-8")).hexdigest()[:12]
 
 
-def _describe_kafka_options(kafka_options: Optional[Mapping[str, Any]]) -> str:
+def _describe_kafka_options(kafka_options: Any) -> str:
     """Build a log-safe description of Kafka options from allowlisted metadata only."""
     options = kafka_options if isinstance(kafka_options, Mapping) else {}
     return (
