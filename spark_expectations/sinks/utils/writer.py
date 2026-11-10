@@ -701,7 +701,7 @@ class SparkExpectationsWriter:
                 f"Writing metrics to the output custom table: {self._context.get_query_dq_output_custom_table_name}, ended"
             )
         except Exception as e:
-            raise SparkExpectationsMiscException(f"error occurred while saving the data into the stats table {e}")
+            raise SparkExpectationsMiscException(f"error occurred while saving the data into the stats table {e}") from None
 
         if self._context.get_enable_obs_dq_report_result is True:
             context = self._context
@@ -993,20 +993,20 @@ class SparkExpectationsWriter:
                     )
                     self._context.set_kafka_write_status("Success")
                     _log.info("Successfully wrote stats to Kafka")
-                except Exception as kafka_error:
-                    # Log the detailed error and set status for notifications
-                    error_message = str(kafka_error)
+                except Exception:
+                    # Secret providers and transports may include credentials in errors.
+                    error_message = "Kafka stats write failed; downstream error details withheld."
                     _log.error(f"Failed to write stats to Kafka: {error_message}")
                     self._context.set_kafka_write_status("Failed")
                     self._context.set_kafka_write_error_message(error_message)
-                    # Re-raise the exception to fail the job with enhanced error message
-                    raise kafka_error
+                    # Keep provider details out of notification text and formatted tracebacks.
+                    raise SparkExpectationsMiscException(error_message) from None
             else:
                 _log.info("Streaming stats to kafka is disabled, hence skipping writing to kafka")
                 self._context.set_kafka_write_status("Disabled")
 
         except Exception as e:
-            raise SparkExpectationsMiscException(f"error occurred while saving the data into the stats table {e}")
+            raise SparkExpectationsMiscException(f"error occurred while saving the data into the stats table {e}") from None
 
     def write_error_records_final(self, df: DataFrame, error_table: str, rule_type: str) -> Tuple[int, DataFrame]:
         try:

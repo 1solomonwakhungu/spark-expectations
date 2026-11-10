@@ -182,3 +182,47 @@ def test_invalid_rule_type_logged_as_invalid(sample_df, expectation, spark):
     assert "foo_dq" in invalid_results
     assert len(invalid_results["foo_dq"]) == 1
     assert "Unknown rule_type" in invalid_results["foo_dq"][0].error_message
+
+@pytest.mark.parametrize(
+    "line_break, indent",
+    [
+        pytest.param("\n", "    ", id="lf_spaces"),
+        pytest.param("\r\n", "\t", id="crlf_tab"),
+    ],
+)
+def test_multiline_query_dq_is_valid_and_executes_in_spark(spark, line_break, indent):
+    """A multi-line query_dq expectation that Spark executes is accepted by the validator."""
+    view_name = "se_multiline_query_dq_synthetic_values"
+    spark.createDataFrame([(1,), (2,), (3,)], "col1 int").createOrReplaceTempView(view_name)
+    try:
+        query = line_break.join(
+            [
+                "SELECT count(*)",
+                f"{indent}FROM {view_name}",
+                f"{indent}WHERE col1 IS NOT NULL",
+            ]
+        )
+        single_line_query = f"SELECT count(*) FROM {view_name} WHERE col1 IS NOT NULL"
+        assert spark.sql(query).collect()[0][0] == 3
+        assert spark.sql(single_line_query).collect()[0][0] == 3
+
+        expectation = f"({query}) = 3"
+        # Same statement shape that the query_dq runtime evaluates.
+        assert spark.sql(f"SELECT ({expectation}) AS OUTPUT").collect()[0][0] is True
+
+        rule = {
+            "rule_type": "query_dq",
+            "expectation": expectation,
+            "rule": "multiline_query_dq",
+            "action_if_failed": "ignore",
+        }
+        result = SparkExpectationsValidateRules.validate_query_dq_expectation(
+            spark.table(view_name), rule, spark, raise_exception=True
+        )
+        assert result.is_valid is True
+        invalid_results = SparkExpectationsValidateRules.validate_expectations(
+            spark.table(view_name), [rule], spark, raise_exception=True
+        )
+        assert invalid_results == {}
+    finally:
+        spark.catalog.dropTempView(view_name)

@@ -706,7 +706,7 @@ c = get_config()  # noqa
 #  
 #          Takes precedence over allow_origin_pat.
 #  Default: ''
-c.ServerApp.allow_origin = '*'
+# c.ServerApp.allow_origin = ''
 
 ## Use a regular expression for the Access-Control-Allow-Origin header
 #  
@@ -1128,9 +1128,10 @@ c.ServerApp.allow_origin = '*'
 ## DEPRECATED. Use IdentityProvider.token
 #  Default: '<DEPRECATED>'
 # c.ServerApp.token = '<DEPRECATED>'
-# !!!!! ---- Disable token/password authentication ------ !!!!
-c.ServerApp.password = ''
-c.ServerApp.token = ''
+# Authentication is left enabled: with no token or password configured here,
+# Jupyter generates a random token at startup and prints it in the server log.
+# Never set the token or password to an empty string, which disables
+# authentication and lets anyone who can reach the port run code.
 
 ## Supply overrides for the tornado.web.Application that the Jupyter server uses.
 #  Default: {}
