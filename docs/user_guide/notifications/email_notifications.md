@@ -86,7 +86,7 @@ Before using SMTP notifications, verify that the following parameters are set co
 - SMTP password
 - Sender email address (`from`)
 - Recipient email address(es) (`to`)
-- Enable/disable SMTP authentication and TLS as needed
+- SMTP authentication settings and verified TLS mode (`starttls` or `ssl`)
 
 ??? info "Sample Python Script to Send a Test Email"
 
@@ -142,7 +142,7 @@ Make sure your SMTP server allows connections from your environment (some provid
         user_config.se_notifications_email_smtp_host: "mailpit",
         user_config.se_notifications_email_smtp_port: 1025,
         # Certificates are verified; trust the local Mailpit CA explicitly
-        user_config.se_notifications_email_smtp_ca_file: "/path/to/mailpit-ca.crt",
+        user_config.se_notifications_email_smtp_ca_file: "/app/spark_expectations/containers/certs/mailpit-ca.crt",
         
         # Email headers (sender, receiver, subject)
         user_config.se_notifications_email_from: "sender@example.com",
