@@ -9,7 +9,7 @@ RUN apt-get update -y \
     && apt-get clean
 
 # Add custom CA certificate and ensure the certificate is available in the build context
-COPY containers/certs/ /usr/local/share/ca-certificates/
+COPY containers/certs/*.crt /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 
 ENV KAFKA_VERSION=3.3.1
