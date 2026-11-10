@@ -52,7 +52,7 @@ create table if not exists `catalog`.`schema`.`{product}_rules` (
     Ignore: The rule is run and the output is logged. No action is performed regardless of whether the rule has succeeded or failed. Applies for all 3 rule types. 
     Drop: The rows that fail the rule get dropped from the dataset. Applies for only row_dq rule type.
     Fail: job fails if the rule fails. Applies for all 3 rule types.
-8. `tag` provide some tag name to dq rule example:  completeness, validity, uniqueness etc. 
+8. `tag` provide the data quality dimension of the rule: one of accuracy, completeness, consistency, timeliness, uniqueness or validity (or leave it empty). Other values are reported, see [Dimension Tag Validation](rule_validation.md#dimension-tag-validation).
 9. `description`  Long description for the rule
 10. `enable_for_source_dq_validation` when true, agg_dq and query_dq will run on the dataset before row_dq rules get excuted (and filter down the dataset).
 11. `enable_for_target_dq_validation` when true, agg_dq and query_dq will run on the dataset after row_dq rules ran.

@@ -1309,7 +1309,7 @@ def test_streaming_dataframe_detection_log_agg_dq():
     se._context.set_dq_stats_table_name("dq_spark.test_stats_table")
 
     with patch.object(se.reader, 'get_rules_from_df',
-                      return_value=({}, [], {
+                      return_value=({}, {}, {
                           'row_dq': False,
                           'source_agg_dq': True,
                           'target_agg_dq': True,
@@ -1385,7 +1385,7 @@ def test_streaming_dataframe_detection_log_query_dq():
     se._context.set_dq_stats_table_name("dq_spark.test_stats_table")
 
     with patch.object(se.reader, 'get_rules_from_df',
-                      return_value=({}, [], {
+                      return_value=({}, {}, {
                           'row_dq': False,
                           'source_agg_dq': False,
                           'target_agg_dq': False,
@@ -1477,7 +1477,7 @@ def test_streaming_dataframe_detection_log_agg_query_dq():
     se._context.set_dq_stats_table_name("dq_spark.test_stats_table")
 
     with patch.object(se.reader, 'get_rules_from_df',
-                      return_value=({}, [], {
+                      return_value=({}, {}, {
                           'row_dq': False,
                           'source_agg_dq': True,
                           'target_agg_dq': True,

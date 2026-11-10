@@ -28,6 +28,7 @@ spark.expectations.notifications.error.drop.threshold: 100
 spark.expectations.agg.dq.detailed.stats: false
 spark.expectations.query.dq.detailed.stats: false
 spark.expectations.job.metadata: None
+spark.expectations.rules.dimension.validation.strict: false
 se.streaming.enable: true
 se.streaming.stats.kafka.custom.config.enable: false
 se.streaming.stats.topic.name: "dq-sparkexpectations-stats"

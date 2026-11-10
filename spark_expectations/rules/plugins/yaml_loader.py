@@ -14,6 +14,11 @@ from spark_expectations.rules.plugins._flatten import (
     rows_to_dataframe,
 )
 from spark_expectations.rules.plugins.base_rule_loader import spark_expectations_rule_loader_impl
+from spark_expectations.utils.rule_dimensions import (
+    STRICT_DIMENSION_VALIDATION_KEY,
+    is_strict_dimension_validation,
+    validate_rule_dimensions,
+)
 
 YAML_EXTENSIONS = {".yaml", ".yml"}
 
@@ -70,4 +75,6 @@ class SparkExpectationsYamlRuleLoaderImpl:
         data = _read_yaml(path)
         env = (options or {}).get("dq_env")
         rows = flatten_rules_list(data, env=env)
+        if is_strict_dimension_validation((options or {}).get(STRICT_DIMENSION_VALIDATION_KEY)):
+            validate_rule_dimensions(rows, strict=True)
         return rows_to_dataframe(rows, spark)
