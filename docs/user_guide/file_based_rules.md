@@ -361,6 +361,9 @@ rules:
 - **Case-insensitive `dq_env` lookup**: `DEV`, `dev`, and `Dev` all match the same environment block.
 - **Per-rule overrides**: Any field set directly on a rule overrides the value from `dq_env` or `defaults`. For example, a single rule can set its own `table_name` or `action_if_failed`.
 - **Type casting**: String values like `"true"`, `"false"`, `"1"`, `"0"` are automatically cast to their correct Python types for boolean and integer columns.
+    - Boolean columns recognize the strings `"true"`, `"yes"`, `"1"`, `"false"`, `"no"` and `"0"` (case-insensitive). Any other string, including a misspelling such as `"tru"` or a value with surrounding spaces such as `" true "`, is treated as `false` and a warning is logged.
+    - Integer columns (`error_drop_threshold`) truncate fractional numbers, so `1.9` becomes `1`, and a warning is logged.
+    - Each warning names the field, the original value, the rule, `product_id` and `table_name`, and where the value was set (`rule definition`, `dq_env.<ENV>` or `defaults`). A value inherited from `dq_env` or `defaults` produces one warning for each rule that uses it. Loading behavior is unchanged; fix the value in the rules file to clear the warning.
 - **Validation**: The loader validates that every rule has the required fields (`rule`, `expectation`) and a valid `rule_type` (`row_dq`, `agg_dq`, `query_dq`). Invalid rules raise `SparkExpectationsUserInputOrConfigInvalidException` with a descriptive message.
 - **Dimension tags**: Pass `options={"spark.expectations.rules.dimension.validation.strict": "true"}` (together with `dq_env` if needed) to make loading fail when a rule's `tag` is not an allowed dimension. Without it the loader does not check tags; unrecognized tags are reported as warnings when the rules run. See [Dimension Tag Validation](rule_validation.md#dimension-tag-validation).
 

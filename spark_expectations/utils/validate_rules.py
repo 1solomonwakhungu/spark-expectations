@@ -12,6 +12,7 @@ from spark_expectations.core.exceptions import (
     SparkExpectationsInvalidAggDQExpectationException,
     SparkExpectationsInvalidQueryDQExpectationException,
     SparkExpectationsInvalidRowDQExpectationException,
+    SparkExpectationsInvalidRuleTypeException,
     SparkExpectationsUserInputOrConfigInvalidException,
 )
 
@@ -37,6 +38,15 @@ class ActionIfFailed(Enum):
     DROP = "drop"
     IGNORE = "ignore"
     FAIL = "fail"
+
+
+# Rows can only be dropped by row-level rules; aggregate and query rules can ignore or fail.
+ALLOWED_ACTIONS_BY_RULE_TYPE: Dict[RuleType, frozenset] = {
+    RuleType.ROW_DQ: frozenset({ActionIfFailed.DROP.value, ActionIfFailed.IGNORE.value, ActionIfFailed.FAIL.value}),
+    RuleType.AGG_DQ: frozenset({ActionIfFailed.IGNORE.value, ActionIfFailed.FAIL.value}),
+    RuleType.QUERY_DQ: frozenset({ActionIfFailed.IGNORE.value, ActionIfFailed.FAIL.value}),
+}
+
 
 class SparkExpectationsValidateRules:
     """
@@ -453,28 +463,42 @@ class SparkExpectationsValidateRules:
     @staticmethod
     def validate_action_if_failed(rule: Dict, raise_exception: bool = False) -> ValidationResult:
         """
-        Validates that the action_if_failed field contains an accepted value.
-        
-        Accepted values are: "drop", "ignore", "fail".
-        
+        Validates that the action_if_failed field contains a value accepted for the rule's rule_type.
+
+        Accepted values are:
+            - row_dq: "drop", "ignore", "fail"
+            - agg_dq and query_dq: "ignore", "fail"
+        A missing or empty action_if_failed is accepted. If the rule_type is missing or not
+        recognized, any of "drop", "ignore", "fail" is accepted; rule_type itself is checked
+        by validate_expectations.
+
         Args:
-            rule (Dict): Rule dictionary containing 'action_if_failed'.
+            rule (Dict): Rule dictionary containing 'action_if_failed' and 'rule_type'.
             raise_exception (bool): If True, raises exception on invalid value.
                                     If False, returns ValidationResult. Default is False.
         Returns:
             ValidationResult: Result containing validation status and error message if any.
         Raises:
             SparkExpectationsUserInputOrConfigInvalidException: If raise_exception is True
-                and the value is not one of the accepted options.
+                and the value is not accepted for the rule's rule_type.
         """
         action = rule.get("action_if_failed", "")
         if not action:
             return ValidationResult(is_valid=True, rule=rule, rule_type=rule.get("rule_type", "unknown"))
-        valid_actions = {e.value for e in ActionIfFailed}
+        try:
+            rule_type: Optional[RuleType] = RuleType(rule.get("rule_type"))
+        except ValueError:
+            rule_type = None
+        if rule_type is None:
+            valid_actions = {e.value for e in ActionIfFailed}
+            rule_type_note = ""
+        else:
+            valid_actions = set(ALLOWED_ACTIONS_BY_RULE_TYPE[rule_type])
+            rule_type_note = f" for rule_type '{rule_type.value}'"
         if action not in valid_actions:
             error_msg = (
                 f"Rule '{rule.get('rule', 'unknown')}' has invalid action_if_failed value: "
-                f"'{action}'. Accepted values are: {sorted(valid_actions)}"
+                f"'{action}'{rule_type_note}. Accepted values are: {sorted(valid_actions)}"
             )
             if raise_exception:
                 raise SparkExpectationsUserInputOrConfigInvalidException(error_msg)
@@ -506,6 +530,15 @@ class SparkExpectationsValidateRules:
             Dict[str, List[ValidationResult]]: A dictionary mapping rule type strings
                 to lists of ValidationResult objects for invalid rules only. Empty 
                 dict if all rules are valid.
+        Raises:
+            SparkExpectationsInvalidRuleTypeException: If raise_exception is True and a
+                rule's rule_type is missing or is not one of "row_dq", "agg_dq", "query_dq".
+                It is a subclass of SparkExpectationsUserInputOrConfigInvalidException.
+            SparkExpectationsUserInputOrConfigInvalidException: If raise_exception is True
+                and a rule has an invalid action_if_failed value.
+            SparkExpectationsInvalidRowDQExpectationException: If raise_exception is True
+                and a row_dq expectation is invalid. The agg_dq and query_dq validators
+                raise their matching exception types.
         """
         invalid_results: Dict[str, List[ValidationResult]] = {}
         valid_count = 0
@@ -515,9 +548,16 @@ class SparkExpectationsValidateRules:
             try:
                 rule_type = RuleType(rule_type_str)
             except ValueError:
+                error_msg = f"Unknown rule_type: '{rule_type_str}'"
+                if raise_exception:
+                    problem = "Missing rule_type" if rule.get("rule_type") in (None, "") else error_msg
+                    raise SparkExpectationsInvalidRuleTypeException(
+                        f"{problem} for rule '{rule.get('rule', 'unknown')}'. "
+                        f"Accepted values are: {[e.value for e in RuleType]}"
+                    )
                 result = ValidationResult(
                     is_valid=False,
-                    error_message=f"Unknown rule_type: '{rule_type_str}'",
+                    error_message=error_msg,
                     rule=rule,
                     rule_type=rule_type_str
                 )

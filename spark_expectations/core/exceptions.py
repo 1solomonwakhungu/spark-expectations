@@ -58,7 +58,7 @@ class SparkExpectationsErrorThresholdExceedsException(Exception):
     """
 
 
-class SparkExpectationsInvalidRuleTypeException(Exception):
+class SparkExpectationsInvalidRuleTypeException(SparkExpectationsUserInputOrConfigInvalidException):
     """
     Throw this exception when an invalid rule type is encountered
     """
