@@ -1,3 +1,4 @@
+import html
 import json
 from typing import Dict, Union, Optional
 import smtplib
@@ -158,11 +159,13 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
                     custom_email_data = json.loads(mail_content)
                     if not _context.get_custom_default_template:
                         template_dir = "config/templates"
-                        env_loader = Environment(loader=PackageLoader("spark_expectations", template_dir))
+                        env_loader = Environment(
+                            loader=PackageLoader("spark_expectations", template_dir), autoescape=True
+                        )
                         template = env_loader.get_template("custom_email_alert_template.jinja")
                     else:
                         template_string = _context.get_custom_default_template
-                        template = Environment(loader=BaseLoader).from_string(template_string)
+                        template = Environment(loader=BaseLoader(), autoescape=True).from_string(template_string)
 
                     mail_content = template.render(custom_email_data)
                     content_type = "html"
@@ -181,11 +184,11 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
             if _context.get_enable_templated_basic_email_body is True:
                 if not _context.get_basic_default_template:
                     template_dir = "config/templates"
-                    env_loader = Environment(loader=PackageLoader("spark_expectations", template_dir))
+                    env_loader = Environment(loader=PackageLoader("spark_expectations", template_dir), autoescape=True)
                     template = env_loader.get_template("basic_email_alert_template.jinja")
                 else:
                     template_string = _context.get_basic_default_template
-                    template = Environment(loader=BaseLoader).from_string(template_string)
+                    template = Environment(loader=BaseLoader(), autoescape=True).from_string(template_string)
 
                 lines = mail_content.strip().split("\n")
                 title = lines[0].strip() if lines else ""
@@ -199,7 +202,8 @@ class SparkExpectationsEmailPluginImpl(SparkExpectationsNotification):
 
                 message_data = {"title": title, "rows": data}
                 html_data = template.render(render_table=template.module.render_table, **message_data)
-                mail_content = f"<h2>{_context.get_mail_subject}</h2>" + html_data
+                # Template values are autoescaped; the subject is inserted outside the template, so escape it here
+                mail_content = f"<h2>{html.escape(str(_context.get_mail_subject))}</h2>" + html_data
                 content_type = "html"
 
         return mail_content, content_type
