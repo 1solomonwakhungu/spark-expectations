@@ -94,3 +94,21 @@ def test_kafka_archive_is_checksum_verified():
     script = kafka_step["run"]
     assert "| tar" not in script
     assert script.index("sha512sum --check") < script.index("tar -xzf")
+
+
+def test_forks_retain_coverage_without_upstream_upload():
+    job = _load(WORKFLOW_DIR / "onpush.yml")["jobs"]["unittesting"]
+    steps = job["steps"]
+    tests = next(step for step in steps if step.get("name") == "Install, lint and test")
+    assert "make cov" in tests["run"]
+    assert not tests.get("continue-on-error", False)
+    artifact = next(step for step in steps if step.get("name") == "Retain coverage report")
+    assert artifact["uses"].startswith("actions/upload-artifact@")
+    assert artifact["with"]["path"] == "coverage.xml"
+    assert artifact["with"]["if-no-files-found"] == "error"
+    assert "if" not in artifact
+    upload = next(step for step in steps if step.get("name") == "Upload coverage reports to Codecov")
+    assert upload["if"] == "github.repository == 'Nike-Inc/spark-expectations'"
+    assert upload["with"]["fail_ci_if_error"] is True
+    assert not upload.get("continue-on-error", False)
+    assert steps.index(tests) < steps.index(artifact) < steps.index(upload)

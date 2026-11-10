@@ -73,7 +73,16 @@ jobs:
           export GITHUB_ACTIONS=true
           make cov
 
+      - name: Retain coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload coverage reports to Codecov
+        if: github.repository == 'Nike-Inc/spark-expectations'
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           fail_ci_if_error: true
