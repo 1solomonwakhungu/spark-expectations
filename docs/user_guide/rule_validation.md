@@ -30,6 +30,18 @@ Monitor your driver logs for validation warnings and fix invalid rules in your r
 !!! tip
     Check your Spark driver logs for messages containing `"Invalid rule detected"` or `"Some rules failed validation"` after a run.
 
+### Strict validation outside the pipeline
+
+The pipeline always validates in non-blocking mode. To check rules yourself, for example in a CI job, call
+`SparkExpectationsValidateRules.validate_expectations(df, rules, spark, raise_exception=True)`.
+It raises on the first invalid rule instead of returning the map of invalid results:
+
+| Problem | Exception |
+|---|---|
+| `rule_type` is missing or is not `row_dq`, `agg_dq`, or `query_dq` | `SparkExpectationsInvalidRuleTypeException` (a subclass of `SparkExpectationsUserInputOrConfigInvalidException`) |
+| Invalid `action_if_failed` | `SparkExpectationsUserInputOrConfigInvalidException` |
+| Invalid `row_dq`, `agg_dq`, or `query_dq` expectation | `SparkExpectationsInvalidRowDQExpectationException`, `SparkExpectationsInvalidAggDQExpectationException`, or `SparkExpectationsInvalidQueryDQExpectationException` |
+
 ## Validation Examples
 
 ### Valid `row_dq` Expressions

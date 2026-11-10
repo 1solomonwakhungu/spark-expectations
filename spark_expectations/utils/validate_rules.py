@@ -12,6 +12,7 @@ from spark_expectations.core.exceptions import (
     SparkExpectationsInvalidAggDQExpectationException,
     SparkExpectationsInvalidQueryDQExpectationException,
     SparkExpectationsInvalidRowDQExpectationException,
+    SparkExpectationsInvalidRuleTypeException,
     SparkExpectationsUserInputOrConfigInvalidException,
 )
 
@@ -506,6 +507,15 @@ class SparkExpectationsValidateRules:
             Dict[str, List[ValidationResult]]: A dictionary mapping rule type strings
                 to lists of ValidationResult objects for invalid rules only. Empty 
                 dict if all rules are valid.
+        Raises:
+            SparkExpectationsInvalidRuleTypeException: If raise_exception is True and a
+                rule's rule_type is missing or is not one of "row_dq", "agg_dq", "query_dq".
+                It is a subclass of SparkExpectationsUserInputOrConfigInvalidException.
+            SparkExpectationsUserInputOrConfigInvalidException: If raise_exception is True
+                and a rule has an invalid action_if_failed value.
+            SparkExpectationsInvalidRowDQExpectationException: If raise_exception is True
+                and a row_dq expectation is invalid. The agg_dq and query_dq validators
+                raise their matching exception types.
         """
         invalid_results: Dict[str, List[ValidationResult]] = {}
         valid_count = 0
@@ -515,9 +525,16 @@ class SparkExpectationsValidateRules:
             try:
                 rule_type = RuleType(rule_type_str)
             except ValueError:
+                error_msg = f"Unknown rule_type: '{rule_type_str}'"
+                if raise_exception:
+                    problem = "Missing rule_type" if rule.get("rule_type") in (None, "") else error_msg
+                    raise SparkExpectationsInvalidRuleTypeException(
+                        f"{problem} for rule '{rule.get('rule', 'unknown')}'. "
+                        f"Accepted values are: {[e.value for e in RuleType]}"
+                    )
                 result = ValidationResult(
                     is_valid=False,
-                    error_message=f"Unknown rule_type: '{rule_type_str}'",
+                    error_message=error_msg,
                     rule=rule,
                     rule_type=rule_type_str
                 )
