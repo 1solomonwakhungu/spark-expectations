@@ -49,3 +49,31 @@ def test_notebooks_explicitly_trust_local_mail_ca():
 def test_notebook_and_kafka_images_do_not_copy_private_keys():
     assert "containers/certs/*.key" in (ROOT / "containers/jupyterlab/Dockerfile.notebook.dockerignore").read_text()
     assert "COPY containers/certs/*.crt " in (ROOT / "containers/kafka/Dockerfile.kafka").read_text()
+
+
+def test_generator_rejects_dangling_symlink(tmp_path):
+    output = tmp_path / "certs"
+    output.mkdir()
+    target = tmp_path / "must-not-be-created"
+    (output / "mailpit-ca.crt").symlink_to(target)
+    result = subprocess.run(["sh", str(ROOT / "containers/mailserver/generate-certs.sh"), str(output)], capture_output=True)
+    assert result.returncode != 0
+    assert not target.exists()
+    assert (output / "mailpit-ca.crt").is_symlink()
+
+
+def test_partial_publication_is_rolled_back(tmp_path):
+    if not shutil.which("openssl"):
+        pytest.skip("openssl is required")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    real_ln = shutil.which("ln")
+    stub = bindir / "ln"
+    stub.write_text('#!/bin/sh\ncase "$2" in */mailpit.crt) exit 1;; esac\nexec "' + real_ln + '" "$@"\n')
+    stub.chmod(0o755)
+    output = tmp_path / "certs"
+    env = {"PATH": str(bindir) + os.pathsep + os.environ["PATH"], "HOME": str(tmp_path)}
+    result = subprocess.run(["sh", str(ROOT / "containers/mailserver/generate-certs.sh"), str(output)], env=env, capture_output=True)
+    assert result.returncode != 0
+    assert list(output.iterdir()) == []
+    assert output.stat().st_mode & 0o777 == 0o755
